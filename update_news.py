@@ -26,22 +26,32 @@ import trafilatura
 API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 MAX_NEWS = 12
+TARGET_PER_LANGUAGE = MAX_NEWS // 2
+MAX_CANDIDATES_PER_LANGUAGE = 60
+MIN_LOGISTICS_SCORE = 72
 
-RISK_TERMS = (
+RISK_TERMS_EN = (
     "closure OR closed OR strike OR tariff OR sanction OR congestion OR "
     "disruption OR attack OR accident OR storm OR restriction OR delay OR "
     "surcharge OR ban OR derailment OR collision OR piracy OR flood OR drought"
 )
 
+RISK_TERMS_RU = (
+    "закрытие OR закрыт OR забастовка OR тариф OR санкции OR очередь OR "
+    "перегрузка OR сбой OR атака OR авария OR шторм OR ограничение OR "
+    "задержка OR надбавка OR запрет OR крушение OR столкновение OR пиратство OR "
+    "наводнение OR засуха"
+)
+
 QUERIES = [
     (
         '(freight OR cargo OR shipping OR port OR maritime OR vessel OR canal) '
-        f'({RISK_TERMS}) sourcelang:english'
+        f'({RISK_TERMS_EN}) sourcelang:english'
     ),
     (
         '(railway OR railroad OR train OR trucking OR truck OR customs OR '
         '"border crossing" OR "air cargo" OR airport) '
-        f'({RISK_TERMS}) sourcelang:english'
+        f'({RISK_TERMS_EN}) sourcelang:english'
     ),
     (
         '(Belarus OR Russia OR Turkey OR China) '
@@ -49,8 +59,18 @@ QUERIES = [
         'sourcelang:english'
     ),
     (
-        '(Belarus OR Russia OR Turkey OR China) '
-        '(freight OR cargo OR shipping OR port OR railway OR trucking OR customs OR border) '
+        '(груз OR грузоперевозки OR порт OR судно OR морские перевозки OR контейнер) '
+        f'({RISK_TERMS_RU}) sourcelang:russian'
+    ),
+    (
+        '(железная дорога OR поезд OR вагон OR грузовик OR фура OR таможня OR '
+        '"пункт пропуска" OR авиагруз OR аэропорт) '
+        f'({RISK_TERMS_RU}) sourcelang:russian'
+    ),
+    (
+        '(Беларусь OR Россия OR Турция OR Китай) '
+        '(груз OR перевозки OR порт OR судно OR железная дорога OR грузовик OR '
+        'таможня OR граница) '
         'sourcelang:russian'
     ),
 ]
@@ -79,28 +99,28 @@ RULES = [
         100,
     ),
     Rule(
-        ("sanction", "export control", "import ban", "trade ban", "санкц", "запрет на импорт", "запрет на экспорт"),
+        ("sanction", "sanctions", "export control", "import ban", "trade ban", "санкц", "запрет на импорт", "запрет на экспорт"),
         "Изменение санкционных или внешнеторговых ограничений.",
         "Нужно повторно проверить допустимость груза, перевозчика и расчётов; возможны отказ в перевозке и смена маршрута.",
         "Высокая",
         95,
     ),
     Rule(
-        ("strike", "walkout", "work stoppage", "labor action", "забастов", "стачк"),
+        ("strike", "strikes", "walkout", "work stoppage", "labor action", "забастов", "стачк"),
         "Забастовка или иное ограничение работы персонала.",
         "Снижается пропускная способность; вероятны очереди, отмены операций и дополнительный простой транспорта.",
         "Высокая",
         90,
     ),
     Rule(
-        ("closed", "closure", "suspend", "shutdown", "blockade", "закрыт", "приостанов", "перекрыт", "блокад"),
+        ("closed", "closure", "closures", "suspend", "suspended", "shutdown", "blockade", "закрыт", "приостанов", "перекрыт", "блокад"),
         "Закрытие или временное ограничение работы маршрута, перехода либо терминала.",
         "Грузы потребуется перенаправлять; вероятны очереди, увеличение пробега, сроков и стоимости доставки.",
         "Высокая",
         88,
     ),
     Rule(
-        ("derail", "collision", "crash", "sank", "sunk", "fire", "explosion", "accident", "авари", "столкнов", "крушен", "пожар", "взрыв", "затон"),
+        ("derail", "derailed", "derailment", "collision", "collided", "crash", "sank", "sunk", "fire", "explosion", "accident", "авари", "столкнов", "крушен", "пожар", "взрыв", "затон"),
         "Авария или повреждение транспорта либо инфраструктуры.",
         "Возможны временная недоступность участка, задержки, дополнительная перегрузка и перенаправление грузов.",
         "Высокая",
@@ -121,21 +141,21 @@ RULES = [
         72,
     ),
     Rule(
-        ("congestion", "backlog", "queue", "overload", "перегруз", "очеред", "скоплен"),
+        ("congestion", "backlog", "backlogs", "queue", "queues", "overload", "перегруз", "очеред", "скоплен"),
         "Перегрузка инфраструктуры и накопление необработанных грузов.",
         "Вероятны ожидание свободного слота, простой транспорта и рост расходов на хранение и демередж.",
         "Средняя",
         70,
     ),
     Rule(
-        ("tariff", "surcharge", "fee", "toll", "rate increase", "тариф", "надбавк", "сбор", "платон", "ставк"),
+        ("tariff", "tariffs", "surcharge", "surcharges", "fee", "fees", "toll", "rate increase", "тариф", "надбавк", "сбор", "платон", "ставк"),
         "Изменение тарифа, сбора или коммерческой надбавки.",
         "Стоимость перевозки изменится; действующие расчёты и предложения клиентам требуется пересчитать.",
         "Средняя",
         68,
     ),
     Rule(
-        ("delay", "disruption", "restriction", "divert", "reroute", "задерж", "сбой", "огранич", "перенаправ", "изменение маршрута"),
+        ("delay", "delayed", "delays", "disruption", "disruptions", "restriction", "restrictions", "divert", "diverted", "reroute", "rerouted", "задерж", "сбой", "огранич", "перенаправ", "изменение маршрута"),
         "Операционные ограничения или изменение маршрута.",
         "Возможны увеличение срока доставки, дополнительный пробег, перегрузка и рост стоимости.",
         "Средняя",
@@ -144,10 +164,63 @@ RULES = [
 ]
 
 TRANSPORT_TERMS = {
-    "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "грузовик", "автоперевоз", "фур", "автомобильн"),
+    "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "грузовик", "грузовой автомобил", "грузовых автомобил", "автоперевоз", "фур", "автомобильн"),
     "Ж/д": ("rail", "railway", "railroad", "train", "wagon", "derail", "железнодорож", "поезд", "вагон", "ржд"),
     "Море": ("port", "ship", "shipping", "vessel", "maritime", "tanker", "container ship", "canal", "strait", "sea ", "порт", "судн", "морск", "танкер", "контейнеровоз", "канал", "пролив"),
     "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "рейс"),
+}
+
+# At least one explicit commercial-freight term is required.  This prevents
+# passenger tourism, baggage and general political stories from entering the
+# feed merely because they mention a border, airport or port.
+COMMERCIAL_FREIGHT_TERMS = (
+    "freight", "cargo", "container", "merchant ship", "commercial vessel",
+    "shipping", "tanker", "terminal", "truck", "trucking", "lorry",
+    "rail freight", "freight train", "wagon", "goods", "consignment",
+    "air cargo", "air freight", "warehouse", "port operations",
+    "груз", "контейнер", "торговое судно", "судоход", "танкер", "терминал",
+    "грузовик", "фур", "вагон", "товар", "отправк", "авиагруз", "склад",
+    "портов", "перевозк",
+)
+
+PASSENGER_TERMS = (
+    "tourist", "tourism", "passenger", "baggage", "luggage", "vacation",
+    "holidaymaker", "турист", "пассажир", "багаж", "отпуск", "путешеств",
+)
+
+MILITARY_TERMS = (
+    "military", "weapon", "ammunition", "troops", "battlefield", "frontline",
+    "военн", "оруж", "боеприпас", "войск", "фронт", "всу",
+)
+
+COMMENTARY_TERMS = (
+    "opinion", "analysis video", "daily review", "live updates", "explainer",
+    "мнение", "обзор событий", "видео", "онлайн-трансляц", "что известно",
+)
+
+PRIORITY_REGION_TERMS = (
+    "belarus", "russia", "turkey", "türkiye", "china",
+    "беларус", "росси", "турц", "китай",
+)
+
+TRUSTED_DOMAINS = {
+    "reuters.com": 14,
+    "apnews.com": 12,
+    "imo.org": 12,
+    "iata.org": 12,
+    "maersk.com": 10,
+    "msc.com": 10,
+    "rzd.ru": 10,
+    "customs.gov.ru": 10,
+    "gpk.gov.by": 10,
+    "bamap.org": 8,
+    "portnews.ru": 8,
+}
+
+LOW_QUALITY_DOMAINS = {
+    "comandir.com",
+    "news.mail.ru",
+    "24tv.ua",
 }
 
 REGIONS = [
@@ -346,14 +419,180 @@ def source_name(url: str, domain: str) -> str:
     return re.sub(r"^www\.", "", host, flags=re.I) or "Источник"
 
 
+def language_group(language: str) -> str | None:
+    """Return the balancing bucket used for the 50/50 source mix."""
+    lowered = clean(language).lower()
+    if lowered.startswith(("russian", "rus", "ru")):
+        return "russian"
+    if lowered.startswith(("english", "eng", "en")):
+        return "foreign"
+    return None
+
+
+def contains_any(text: str, terms: Iterable[str]) -> bool:
+    lowered = text.lower()
+    return any(has_term(lowered, term) for term in terms)
+
+
+def domain_bonus(domain: str) -> int:
+    domain = domain.lower()
+    if domain in LOW_QUALITY_DOMAINS:
+        return -25
+    if domain in TRUSTED_DOMAINS:
+        return TRUSTED_DOMAINS[domain]
+    if domain.endswith((".gov", ".gov.by", ".gov.ru", ".gov.cn", ".gov.tr")):
+        return 10
+    if domain.endswith(("europa.eu", "unece.org", "wto.org")):
+        return 10
+    return 0
+
+
 def candidate_score(article: dict) -> int:
     title = clean(article.get("title"))
     rule = rule_for(title)
     score = rule.score if rule else 0
-    lowered = title.lower()
-    if any(has_term(lowered, term) for term in ("belarus", "russia", "turkey", "china", "беларус", "росси", "турц", "китай")):
+    if contains_any(title, PRIORITY_REGION_TERMS):
         score += 15
+    domain = source_name(clean(article.get("url")), clean(article.get("domain")))
+    score += domain_bonus(domain)
+    if contains_any(title, COMMERCIAL_FREIGHT_TERMS):
+        score += 10
+    if contains_any(title, PASSENGER_TERMS):
+        score -= 35
+    if contains_any(title, COMMENTARY_TERMS):
+        score -= 20
     return score
+
+
+def logistics_score(
+    text: str,
+    rule: Rule,
+    transports: list[str],
+    directions: list[str],
+    domain: str,
+) -> int:
+    """Estimate operational relevance specifically for commercial freight."""
+    score = rule.score
+    score += min(len(transports), 2) * 4
+    score += domain_bonus(domain)
+
+    if contains_any(text, COMMERCIAL_FREIGHT_TERMS):
+        score += 10
+    if directions != ["Другие"]:
+        score += 12
+    if contains_any(text, COMMENTARY_TERMS):
+        score -= 22
+    if contains_any(text, PASSENGER_TERMS):
+        score -= 35
+
+    return max(0, min(100, score))
+
+
+def article_to_news(article: dict, translator) -> dict | None:
+    original_title = clean(article.get("title"))
+    language = clean(article.get("language"))
+    group = language_group(language)
+    if not group:
+        return None
+
+    url = clean(article.get("url"))
+    domain = source_name(url, clean(article.get("domain")))
+    excerpt = article_excerpt(url)
+    combined = f"{original_title} {excerpt}"
+
+    # Exclude passenger-only and military-only stories.  They may contain the
+    # words border, airport, railway or port but do not describe freight impact.
+    has_commercial_context = contains_any(combined, COMMERCIAL_FREIGHT_TERMS)
+    if not has_commercial_context:
+        return None
+    if contains_any(combined, PASSENGER_TERMS) and not contains_any(
+        combined,
+        (
+            "freight", "cargo", "container", "truck", "shipping", "goods",
+            "груз", "контейнер", "грузовик", "фур", "товар", "перевозк",
+        ),
+    ):
+        return None
+    if contains_any(combined, MILITARY_TERMS) and not contains_any(
+        combined,
+        (
+            "freight", "cargo", "container", "merchant ship", "commercial vessel",
+            "truck", "rail freight", "груз", "контейнер", "торговое судно",
+            "грузовик", "фур", "вагон", "перевозк",
+        ),
+    ):
+        return None
+
+    rule = rule_for(combined)
+    transports = transports_for(combined)
+    if not rule or not transports:
+        return None
+
+    directions = directions_for(combined)
+    score = logistics_score(combined, rule, transports, directions, domain)
+    if score < MIN_LOGISTICS_SCORE:
+        return None
+
+    title_ru = translate(original_title, language, translator)
+    excerpt_ru = translate(excerpt, language, translator) if excerpt else ""
+    fact = (excerpt_ru if len(excerpt_ru) >= 45 else title_ru)[:700]
+    route = route_for(combined, directions, clean(article.get("sourcecountry")))
+
+    return {
+        "date": date_for(clean(article.get("seendate"))),
+        "importance": "Высокая" if score >= 88 else "Средняя",
+        "importanceScore": score,
+        "sourceLanguage": "Русскоязычный" if group == "russian" else "Иностранный",
+        "transports": transports,
+        "directions": directions,
+        "title": title_ru,
+        "route": route,
+        "fact": fact,
+        "cause": rule.cause,
+        "effect": rule.effect,
+        "sources": [{"name": domain, "url": url}],
+        "assessment": f"Алгоритмическая значимость для грузовой логистики: {score}/100",
+    }
+
+
+def build_language_pool(
+    articles: list[dict],
+    group: str,
+    translator,
+    accepted_titles: list[str],
+) -> list[dict]:
+    candidates = [
+        article
+        for article in articles
+        if language_group(clean(article.get("language"))) == group
+    ]
+    candidates.sort(key=candidate_score, reverse=True)
+
+    pool: list[dict] = []
+    per_domain: dict[str, int] = {}
+    for article in candidates[:MAX_CANDIDATES_PER_LANGUAGE]:
+        if len(pool) >= MAX_NEWS:
+            break
+
+        original_title = clean(article.get("title"))
+        if is_duplicate(original_title, accepted_titles):
+            continue
+
+        url = clean(article.get("url"))
+        domain = source_name(url, clean(article.get("domain")))
+        if per_domain.get(domain, 0) >= 2:
+            continue
+
+        item = article_to_news(article, translator)
+        if not item:
+            continue
+
+        pool.append(item)
+        accepted_titles.append(original_title)
+        per_domain[domain] = per_domain.get(domain, 0) + 1
+
+    pool.sort(key=lambda item: item["importanceScore"], reverse=True)
+    return pool
 
 
 def build_feed(articles: list[dict]) -> dict:
@@ -365,73 +604,43 @@ def build_feed(articles: list[dict]) -> dict:
         if url.startswith("http") and title:
             unique_by_url[url] = article
 
-    ranked = sorted(unique_by_url.values(), key=candidate_score, reverse=True)
-    news: list[dict] = []
+    unique_articles = list(unique_by_url.values())
     accepted_titles: list[str] = []
-    per_domain: dict[str, int] = {}
+    russian_pool = build_language_pool(
+        unique_articles, "russian", translator, accepted_titles
+    )
+    foreign_pool = build_language_pool(
+        unique_articles, "foreign", translator, accepted_titles
+    )
 
-    for article in ranked:
-        if len(news) >= MAX_NEWS:
-            break
-
-        original_title = clean(article.get("title"))
-        language = clean(article.get("language")) or "English"
-        if not language.lower().startswith(("english", "eng", "en", "russian", "rus", "ru")):
-            continue
-        if is_duplicate(original_title, accepted_titles):
-            continue
-
-        url = clean(article.get("url"))
-        domain = source_name(url, clean(article.get("domain")))
-        if per_domain.get(domain, 0) >= 2:
-            continue
-
-        excerpt = article_excerpt(url)
-        combined = f"{original_title} {excerpt}"
-        rule = rule_for(combined)
-        if not rule:
-            continue
-
-        title_ru = translate(original_title, language, translator)
-        excerpt_ru = translate(excerpt, language, translator) if excerpt else ""
-        fact = excerpt_ru if len(excerpt_ru) >= 45 else title_ru
-        fact = fact[:700]
-
-        directions = directions_for(combined)
-        transports = transports_for(combined)
-        if not transports:
-            continue
-        route = route_for(combined, directions, clean(article.get("sourcecountry")))
-
-        news.append(
-            {
-                "date": date_for(clean(article.get("seendate"))),
-                "importance": rule.importance,
-                "transports": transports,
-                "directions": directions,
-                "title": title_ru,
-                "route": route,
-                "fact": fact,
-                "cause": rule.cause,
-                "effect": rule.effect,
-                "sources": [{"name": domain, "url": url}],
-                "assessment": "Правило: ключевые слова и тип события",
-            }
+    # Strict 50/50: if one group has fewer than six suitable articles, publish
+    # the same smaller number from each group instead of distorting the ratio.
+    pair_count = min(
+        TARGET_PER_LANGUAGE,
+        len(russian_pool),
+        len(foreign_pool),
+    )
+    news = russian_pool[:pair_count] + foreign_pool[:pair_count]
+    news.sort(
+        key=lambda item: (
+            0 if item["importance"] == "Высокая" else 1,
+            -item["importanceScore"],
         )
-        accepted_titles.append(original_title)
-        per_domain[domain] = per_domain.get(domain, 0) + 1
-
-    # Python sort is stable, so the relevance order inside each importance
-    # group remains the same as in the ranked candidate list.
-    news.sort(key=lambda item: 0 if item["importance"] == "Высокая" else 1)
+    )
 
     return {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "periodHours": 24,
         "language": "ru",
         "analysisMethod": "rule-based",
+        "sourceMix": {
+            "target": "50/50",
+            "russian": pair_count,
+            "foreign": pair_count,
+        },
         "notice": (
-            "Перевод выполнен локальной открытой моделью. Причина и последствие — "
+            "Лента содержит равное количество русскоязычных и иностранных источников. "
+            "Перевод выполнен локальной открытой моделью. Важность, причина и последствие — "
             "алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник."
         ),
         "news": news,
@@ -461,6 +670,14 @@ def main() -> int:
         return 1
 
     feed = build_feed(articles)
+    if not feed["news"]:
+        print(
+            "No balanced set of relevant Russian and foreign logistics news was found; "
+            "existing news.json was preserved.",
+            file=sys.stderr,
+        )
+        return 1
+
     temporary = OUTPUT_PATH.with_suffix(".json.tmp")
     temporary.write_text(
         json.dumps(feed, ensure_ascii=False, indent=2) + "\n",
