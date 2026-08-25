@@ -1,0 +1,8 @@
+{
+  "updatedAt": "",
+  "periodHours": 24,
+  "language": "ru",
+  "analysisMethod": "rule-based",
+  "notice": "Лента ещё не обновлялась. Запустите GitHub Actions вручную один раз.",
+  "news": []
+}
