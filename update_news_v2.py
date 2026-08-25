@@ -29,6 +29,9 @@ MAX_NEWS = 12
 TARGET_PER_LANGUAGE = MAX_NEWS // 2
 MAX_CANDIDATES_PER_LANGUAGE = 60
 MIN_LOGISTICS_SCORE = 72
+GDELT_MAX_RECORDS = 250
+GDELT_RETRIES = 4
+GDELT_RETRY_DELAY = 15
 
 RISK_TERMS_EN = (
     "closure OR closed OR strike OR tariff OR sanction OR congestion OR "
@@ -45,32 +48,17 @@ RISK_TERMS_RU = (
 
 QUERIES = [
     (
-        '(freight OR cargo OR shipping OR port OR maritime OR vessel OR canal) '
-        f'({RISK_TERMS_EN}) sourcelang:english'
-    ),
-    (
-        '(railway OR railroad OR train OR trucking OR truck OR customs OR '
+        '(freight OR cargo OR shipping OR port OR maritime OR vessel OR canal OR '
+        'railway OR railroad OR train OR trucking OR truck OR customs OR '
         '"border crossing" OR "air cargo" OR airport) '
-        f'({RISK_TERMS_EN}) sourcelang:english'
-    ),
-    (
-        '(Belarus OR Russia OR Turkey OR China) '
-        '(freight OR cargo OR shipping OR port OR railway OR trucking OR customs OR border) '
+        f'({RISK_TERMS_EN} OR Belarus OR Russia OR Turkey OR China) '
         'sourcelang:english'
     ),
     (
-        '(груз OR грузоперевозки OR порт OR судно OR морские перевозки OR контейнер) '
-        f'({RISK_TERMS_RU}) sourcelang:russian'
-    ),
-    (
-        '(железная дорога OR поезд OR вагон OR грузовик OR фура OR таможня OR '
-        '"пункт пропуска" OR авиагруз OR аэропорт) '
-        f'({RISK_TERMS_RU}) sourcelang:russian'
-    ),
-    (
-        '(Беларусь OR Россия OR Турция OR Китай) '
-        '(груз OR перевозки OR порт OR судно OR железная дорога OR грузовик OR '
-        'таможня OR граница) '
+        '(груз OR грузоперевозки OR порт OR судно OR морские перевозки OR '
+        'контейнер OR железная дорога OR поезд OR вагон OR грузовик OR фура OR '
+        'таможня OR "пункт пропуска" OR авиагруз OR аэропорт) '
+        f'({RISK_TERMS_RU} OR Беларусь OR Россия OR Турция OR Китай) '
         'sourcelang:russian'
     ),
 ]
@@ -252,21 +240,49 @@ def has_term(lowered_text: str, term: str) -> bool:
 
 
 def fetch_gdelt(session: requests.Session, query: str) -> list[dict]:
-    response = session.get(
-        API_URL,
-        params={
-            "query": query,
-            "mode": "artlist",
-            "maxrecords": 75,
-            "format": "json",
-            "sort": "datedesc",
-            "timespan": "24h",
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    return payload.get("articles", []) if isinstance(payload, dict) else []
+    last_error: Exception | None = None
+
+    for attempt in range(1, GDELT_RETRIES + 1):
+        try:
+            response = session.get(
+                API_URL,
+                params={
+                    "query": query,
+                    "mode": "artlist",
+                    "maxrecords": GDELT_MAX_RECORDS,
+                    "format": "json",
+                    "sort": "datedesc",
+                    "timespan": "24h",
+                },
+                timeout=75,
+            )
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "").lower()
+            body_start = response.text[:250].lower()
+            if "application/json" not in content_type and (
+                "limit requests" in body_start
+                or "temporarily unavailable" in body_start
+                or "please try again" in body_start
+            ):
+                raise RuntimeError(clean(response.text[:250]))
+
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise RuntimeError("GDELT returned a non-object JSON response")
+            return payload.get("articles", [])
+        except Exception as error:
+            last_error = error
+            if attempt == GDELT_RETRIES:
+                break
+            delay = GDELT_RETRY_DELAY * attempt
+            print(
+                f"GDELT retry {attempt}/{GDELT_RETRIES - 1} in {delay}s: {error}",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+
+    raise RuntimeError(f"GDELT request failed after {GDELT_RETRIES} attempts: {last_error}")
 
 
 def get_translator():
@@ -661,7 +677,7 @@ def main() -> int:
         except Exception as error:
             failures.append(f"query {index + 1}: {error}")
         if index < len(QUERIES) - 1:
-            time.sleep(6)
+            time.sleep(20)
 
     if not articles:
         print("All GDELT requests failed; existing news.json was preserved.", file=sys.stderr)
@@ -671,12 +687,14 @@ def main() -> int:
 
     feed = build_feed(articles)
     if not feed["news"]:
+        for failure in failures:
+            print(failure, file=sys.stderr)
         print(
             "No balanced set of relevant Russian and foreign logistics news was found; "
             "existing news.json was preserved.",
             file=sys.stderr,
         )
-        return 1
+        return 1 if failures else 0
 
     temporary = OUTPUT_PATH.with_suffix(".json.tmp")
     temporary.write_text(
