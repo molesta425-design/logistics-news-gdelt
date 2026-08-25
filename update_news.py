@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -31,7 +31,8 @@ TARGET_PER_LANGUAGE = MAX_NEWS // 2
 MAX_CANDIDATES_PER_LANGUAGE = 100
 MIN_LOGISTICS_SCORE = 72
 RSS_RETRIES = 3
-RSS_RETRY_DELAY = 10
+NEWS_WINDOW_HOURS = 24
+MAX_FUTURE_SKEW_MINUTES = 10
 
 RISK_TERMS_EN = (
     "closure OR closed OR strike OR tariff OR sanction OR congestion OR "
