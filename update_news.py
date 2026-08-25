@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a Russian logistics-news feed from the free GDELT DOC API.
+"""Build a Russian logistics-news feed from free Google News RSS searches.
 
 The script deliberately uses no paid API. Translation is performed locally
 with Argos Translate. Cause and effect are rule-based assessments and are
@@ -15,23 +15,23 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
+from xml.etree import ElementTree
 
 import requests
 import trafilatura
 
 
-API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 MAX_NEWS = 12
 TARGET_PER_LANGUAGE = MAX_NEWS // 2
-MAX_CANDIDATES_PER_LANGUAGE = 60
+MAX_CANDIDATES_PER_LANGUAGE = 100
 MIN_LOGISTICS_SCORE = 72
-GDELT_MAX_RECORDS = 250
-GDELT_RETRIES = 4
-GDELT_RETRY_DELAY = 15
+RSS_RETRIES = 3
+RSS_RETRY_DELAY = 10
 
 RISK_TERMS_EN = (
     "closure OR closed OR strike OR tariff OR sanction OR congestion OR "
@@ -46,24 +46,36 @@ RISK_TERMS_RU = (
     "наводнение OR засуха"
 )
 
-QUERIES = [
-    (
-        '(freight OR cargo OR shipping OR port OR maritime OR vessel OR canal OR '
-        'railway OR railroad OR train OR trucking OR truck OR customs OR '
-        '"border crossing" OR "air cargo" OR airport) '
-        f'({RISK_TERMS_EN} OR Belarus OR Russia OR Turkey OR China) '
-        'sourcelang:english'
-    ),
-    (
-        '(груз OR грузоперевозки OR порт OR судно OR морские перевозки OR '
-        'контейнер OR железная дорога OR поезд OR вагон OR грузовик OR фура OR '
-        'таможня OR "пункт пропуска" OR авиагруз OR аэропорт) '
-        f'({RISK_TERMS_RU} OR Беларусь OR Россия OR Турция OR Китай) '
-        'sourcelang:russian'
-    ),
+RSS_FEEDS = [
+    {
+        "label": "foreign",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "query": (
+            '(freight OR cargo OR shipping OR port OR maritime OR vessel OR canal OR '
+            'railway OR train OR trucking OR truck OR customs OR "border crossing" OR '
+            '"air cargo") '
+            f'({RISK_TERMS_EN} OR Belarus OR Russia OR Turkey OR China) when:1d'
+        ),
+    },
+    {
+        "label": "russian",
+        "language": "Russian",
+        "hl": "ru",
+        "gl": "RU",
+        "ceid": "RU:ru",
+        "query": (
+            '(груз OR грузоперевозки OR порт OR судно OR контейнер OR '
+            'железная дорога OR поезд OR вагон OR грузовик OR фура OR таможня OR '
+            '"пункт пропуска" OR авиагруз OR аэропорт) '
+            f'({RISK_TERMS_RU} OR Беларусь OR Россия OR Турция OR Китай) when:1d'
+        ),
+    },
 ]
 
-USER_AGENT = "logistics-news-gdelt/1.0 (+public GitHub Actions feed)"
+USER_AGENT = "logistics-news-rss/2.0 (+public GitHub Actions feed)"
 
 
 @dataclass(frozen=True)
@@ -239,50 +251,70 @@ def has_term(lowered_text: str, term: str) -> bool:
     return normalized in lowered_text
 
 
-def fetch_gdelt(session: requests.Session, query: str) -> list[dict]:
+def rss_date(value: str) -> str:
+    try:
+        return parsedate_to_datetime(clean(value)).strftime("%Y%m%d")
+    except (TypeError, ValueError, OverflowError):
+        return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def fetch_google_news_rss(session: requests.Session, feed: dict) -> list[dict]:
+    url = "https://news.google.com/rss/search?" + urlencode(
+        {
+            "q": feed["query"],
+            "hl": feed["hl"],
+            "gl": feed["gl"],
+            "ceid": feed["ceid"],
+        }
+    )
     last_error: Exception | None = None
 
-    for attempt in range(1, GDELT_RETRIES + 1):
+    for attempt in range(1, RSS_RETRIES + 1):
         try:
-            response = session.get(
-                API_URL,
-                params={
-                    "query": query,
-                    "mode": "artlist",
-                    "maxrecords": GDELT_MAX_RECORDS,
-                    "format": "json",
-                    "sort": "datedesc",
-                    "timespan": "24h",
-                },
-                timeout=75,
-            )
+            response = session.get(url, timeout=60)
             response.raise_for_status()
+            root = ElementTree.fromstring(response.content)
+            articles: list[dict] = []
 
-            content_type = response.headers.get("content-type", "").lower()
-            body_start = response.text[:250].lower()
-            if "application/json" not in content_type and (
-                "limit requests" in body_start
-                or "temporarily unavailable" in body_start
-                or "please try again" in body_start
-            ):
-                raise RuntimeError(clean(response.text[:250]))
+            for item in root.findall("./channel/item"):
+                title = clean(item.findtext("title"))
+                link = clean(item.findtext("link"))
+                source_element = item.find("source")
+                source = clean(source_element.text if source_element is not None else "")
+                source_url = clean(
+                    source_element.get("url") if source_element is not None else ""
+                )
 
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise RuntimeError("GDELT returned a non-object JSON response")
-            return payload.get("articles", [])
+                if source and title.endswith(" - " + source):
+                    title = title[: -(len(source) + 3)].strip()
+                if not title or not link.startswith("http"):
+                    continue
+
+                articles.append(
+                    {
+                        "title": title,
+                        "url": link,
+                        "domain": urlparse(source_url).netloc or source,
+                        "language": feed["language"],
+                        "sourcecountry": "",
+                        "seendate": rss_date(item.findtext("pubDate") or ""),
+                        "excerpt": title,
+                    }
+                )
+
+            return articles
         except Exception as error:
             last_error = error
-            if attempt == GDELT_RETRIES:
+            if attempt == RSS_RETRIES:
                 break
-            delay = GDELT_RETRY_DELAY * attempt
+            delay = RSS_RETRY_DELAY * attempt
             print(
-                f"GDELT retry {attempt}/{GDELT_RETRIES - 1} in {delay}s: {error}",
+                f"RSS retry {attempt}/{RSS_RETRIES - 1} in {delay}s: {error}",
                 file=sys.stderr,
             )
             time.sleep(delay)
 
-    raise RuntimeError(f"GDELT request failed after {GDELT_RETRIES} attempts: {last_error}")
+    raise RuntimeError(f"RSS request failed after {RSS_RETRIES} attempts: {last_error}")
 
 
 def get_translator():
@@ -513,7 +545,9 @@ def article_to_news(article: dict, translator) -> dict | None:
 
     url = clean(article.get("url"))
     domain = source_name(url, clean(article.get("domain")))
-    excerpt = article_excerpt(url)
+    excerpt = clean(article.get("excerpt"))
+    if len(excerpt) < 45:
+        excerpt = article_excerpt(url)
     combined = f"{original_title} {excerpt}"
 
     # Exclude passenger-only and military-only stories.  They may contain the
@@ -656,7 +690,8 @@ def build_feed(articles: list[dict]) -> dict:
         },
         "notice": (
             "Лента содержит равное количество русскоязычных и иностранных источников. "
-            "Перевод выполнен локальной открытой моделью. Важность, причина и последствие — "
+            "Новости получены из открытых RSS-поисков Google News. Перевод выполнен "
+            "локальной открытой моделью. Важность, причина и последствие — "
             "алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник."
         ),
         "news": news,
@@ -665,22 +700,27 @@ def build_feed(articles: list[dict]) -> dict:
 
 def main() -> int:
     session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json"})
+    session.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/rss+xml, application/xml, text/xml",
+        }
+    )
 
     articles: list[dict] = []
     failures: list[str] = []
-    for index, query in enumerate(QUERIES):
+    for index, feed in enumerate(RSS_FEEDS):
         try:
-            batch = fetch_gdelt(session, query)
+            batch = fetch_google_news_rss(session, feed)
             articles.extend(batch)
-            print(f"GDELT query {index + 1}: {len(batch)} articles")
+            print(f"RSS {feed['label']}: {len(batch)} articles")
         except Exception as error:
-            failures.append(f"query {index + 1}: {error}")
-        if index < len(QUERIES) - 1:
-            time.sleep(20)
+            failures.append(f"RSS {feed['label']}: {error}")
+        if index < len(RSS_FEEDS) - 1:
+            time.sleep(3)
 
     if not articles:
-        print("All GDELT requests failed; existing news.json was preserved.", file=sys.stderr)
+        print("All RSS requests failed; existing news.json was preserved.", file=sys.stderr)
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
