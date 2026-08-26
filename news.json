@@ -1,63 +1,15 @@
 {
-  "updatedAt": "2026-08-26T06:04:11.329675+00:00",
+  "updatedAt": "2026-08-26T07:59:40.973684+00:00",
   "periodHours": 24,
   "language": "ru",
   "analysisMethod": "rule-based",
   "sourceMix": {
     "target": "50/50",
-    "russian": 3,
-    "foreign": 3
+    "russian": 1,
+    "foreign": 1
   },
   "notice": "Лента содержит равное количество русскоязычных и иностранных источников. Новости получены из общего RSS-поиска Google News и дополнительных поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен локальной открытой моделью. Важность, причина и последствие — алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник.",
   "news": [
-    {
-      "date": "25.08.2026",
-      "importance": "Высокая",
-      "importanceScore": 100,
-      "sourceLanguage": "Русскоязычный",
-      "transports": [
-        "Море"
-      ],
-      "directions": [
-        "Другие"
-      ],
-      "title": "Морские перевозки Украины сократились в 3–4 раза из-за атак РФ: Зеленский рассказал о ситуации",
-      "route": "Международные грузовые маршруты",
-      "fact": "Морские перевозки Украины сократились в 3–4 раза из-за атак РФ: Зеленский рассказал о ситуации",
-      "cause": "Угроза безопасности, вооружённый инцидент или нападение на транспортную инфраструктуру.",
-      "effect": "Возможны остановка движения, перенаправление грузов, рост страховых надбавок, стоимости и сроков доставки.",
-      "sources": [
-        {
-          "name": "antikor.info",
-          "url": "https://news.google.com/rss/articles/CBMizgFBVV95cUxOaS1wVlpyQ1RCNTYydlNaZXlPWEhPN2xBXzhCZmpzTGJCNEwyblBDaGF4b0RNNU9OeDFXdzU1bVhJV0N3M1AtR2VQLV9TY1JRbEo4emtpQ2hsUVlQaWR5MklxX053Y1ZXcjJaa0NWY2lKUXVtOERNZ0FxVGNROWowR01hbWk0aG1odWM0dHdqLXJ0UUZENXdOWmFsTkt5YkxSdjVSTlF4Y1MyYjhTV0VIeTVYdzZzU3VVcHRQcGYxTUJrb0d6WFdlUGlPQ0NzZw?oc=5"
-        }
-      ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 100/100"
-    },
-    {
-      "date": "25.08.2026",
-      "importance": "Высокая",
-      "importanceScore": 100,
-      "sourceLanguage": "Иностранный",
-      "transports": [
-        "Море"
-      ],
-      "directions": [
-        "Другие"
-      ],
-      "title": "Танкер выведен из строя в Ормузском проливе",
-      "route": "Ормузский пролив",
-      "fact": "Танкер выведен из строя в Ормузском проливе",
-      "cause": "Угроза безопасности, вооружённый инцидент или нападение на транспортную инфраструктуру.",
-      "effect": "Возможны остановка движения, перенаправление грузов, рост страховых надбавок, стоимости и сроков доставки.",
-      "sources": [
-        {
-          "name": "seatrade-maritime.com",
-          "url": "https://news.google.com/rss/articles/CBMijgFBVV95cUxNbDI5aVNpbzRzbXBBc0tsZFpyWkM5b0xwYlJnM0RhWWdTNHpnMEdZVWtWcm15MXF4SGpLV3VsNlhqcGNaaHhqSVg5UERCRkNiaXNFRFpXSWh6VVRlZzVqTUU4RmRRU1JSdXZPVmpDNml5QXp6Y0ROck93bVNTWXIxUWdUc1M4QmlWY2llU0hn?oc=5"
-        }
-      ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 100/100"
-    },
     {
       "date": "25.08.2026",
       "importance": "Средняя",
@@ -85,30 +37,6 @@
     {
       "date": "25.08.2026",
       "importance": "Средняя",
-      "importanceScore": 92,
-      "sourceLanguage": "Иностранный",
-      "transports": [
-        "Море"
-      ],
-      "directions": [
-        "Другие"
-      ],
-      "title": "Перегрузка контейнерных портов побила рекорд эпохи ковидов",
-      "route": "Международные грузовые маршруты",
-      "fact": "Перегрузка контейнерных портов побила рекорд эпохи ковидов",
-      "cause": "Перегрузка инфраструктуры и накопление необработанных грузов.",
-      "effect": "Вероятны ожидание свободного слота, простой транспорта и рост расходов на хранение и демередж.",
-      "sources": [
-        {
-          "name": "splash247.com",
-          "url": "https://news.google.com/rss/articles/CBMifkFVX3lxTE9TTFBmbE9ITm1UMm42TEhsZ3VScnNOQmhxb0NrWWEtdnBBM29sYi00X3JRaDFERERUVnRUTkE2UEFwd3dTSEc4dllNTVhXc3JiaEtDZHhfWWdlMDE3Wl9OVVhiR0pfbjRyOWlnWkdYTXJOX0xoVjVsR0QyeGczUQ?oc=5"
-        }
-      ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 92/100"
-    },
-    {
-      "date": "25.08.2026",
-      "importance": "Средняя",
       "importanceScore": 86,
       "sourceLanguage": "Русскоязычный",
       "transports": [
@@ -129,30 +57,6 @@
         }
       ],
       "assessment": "Алгоритмическая значимость для грузовой логистики: 86/100"
-    },
-    {
-      "date": "25.08.2026",
-      "importance": "Средняя",
-      "importanceScore": 74,
-      "sourceLanguage": "Русскоязычный",
-      "transports": [
-        "Море"
-      ],
-      "directions": [
-        "Другие"
-      ],
-      "title": "Индия открыла свои порты для грузов, перенаправленных с Ормузского пролива",
-      "route": "Ормузский пролив",
-      "fact": "Индия открыла свои порты для грузов, перенаправленных с Ормузского пролива",
-      "cause": "Операционные ограничения или изменение маршрута.",
-      "effect": "Возможны увеличение срока доставки, дополнительный пробег, перегрузка и рост стоимости.",
-      "sources": [
-        {
-          "name": "trans.ru",
-          "url": "https://news.google.com/rss/articles/CBMingFBVV95cUxQVGJUckZXNnR4YXNGMUU1TVJUSXBjQnM4TXVzTjU2MUxwUWdlQUloQXVjVTNXemxFZWNEUFlqbDVPdWU3akVQM1FBWURwSDJ3dlc1TFAwWVdyRktzRGxJdFpldUJXb1pJV1U2TDg4djdRWTVLaGVxMGxUZlpBUGhDbk01cnc0cVV5bFNJbHAzS3ZsNjNIS0VwQW1ZRV9iUQ?oc=5"
-        }
-      ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 74/100"
     }
   ]
 }
