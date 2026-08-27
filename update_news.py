@@ -261,7 +261,8 @@ RULES = [
             "mandatory transport document", "mandatory electronic", "must use e-cmr",
             "required transport document", "document requirement", "documentation requirement",
             "обязательн перевозочн документ", "обязательн транспортн документ",
-            "обязательн электронн накладн", "обязательн эпд",
+            "обязательн электронн накладн", "обязательн электронн транспортн накладн",
+            "обязательн эпд",
             "новые требования к документ", "изменения в оформлении документ",
         ),
         "Вводятся обязательные требования к перевозочным или таможенным документам.",
@@ -275,7 +276,8 @@ RULES = [
             "consignment note", "e-cmr", "bill of lading", "electronic bill of lading",
             "air waybill", "e-awb", "rail consignment note", "transit declaration",
             "customs declaration", "cargo manifest", "transport permit",
-            "транспортн документ", "перевозочн документ", "электронн накладн", "эпд",
+            "транспортн документ", "перевозочн документ", "электронн накладн", "накладн", "эпд",
+            "транспортн накладн", "электронн транспортн накладн",
             "е-cmr", "коносамент", "авианакладн", "железнодорожн накладн",
             "смгс", "цим", "транзитн деклараци", "таможенн деклараци",
             "грузов манифест", "разрешени на перевоз",
@@ -341,7 +343,7 @@ RULES = [
 ]
 
 TRANSPORT_TERMS = {
-    "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "e-cmr", "road consignment note", "грузовик", "грузовой автомобил", "грузовых автомобил", "автоперевоз", "фур", "автомобильн", "транспортная накладная", "е-cmr"),
+    "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "e-cmr", "road consignment note", "грузовик", "грузовой автомобил", "грузовые автомобил", "грузовых автомобил", "грузовой транспорт", "автоперевоз", "фур", "автомобильн", "транспортная накладная", "транспортн накладн", "е-cmr"),
     "Ж/д": ("rail", "railway", "railroad", "train", "wagon", "derail", "rail consignment note", "smgs", "cim", "железнодорож", "поезд", "вагон", "ржд", "железнодорожная накладная", "смгс", "цим"),
     "Море": ("port", "ship", "shipping", "vessel", "maritime", "tanker", "container ship", "canal", "strait", "sea ", "bill of lading", "ebl", "порт", "судн", "морск", "танкер", "контейнеровоз", "канал", "пролив", "коносамент"),
     "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "air waybill", "e-awb", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "рейс", "авианакладн"),
@@ -350,7 +352,7 @@ TRANSPORT_TERMS = {
 GENERIC_DOCUMENT_TERMS = (
     "transport document", "electronic transport document", "transport permit",
     "customs declaration", "transit declaration", "cargo manifest",
-    "транспортн документ", "перевозочн документ", "эпд",
+    "транспортн документ", "перевозочн документ", "транспортн накладн", "эпд",
     "таможенн деклараци", "транзитн деклараци", "грузов манифест",
     "разрешени на перевоз",
 )
@@ -367,7 +369,7 @@ COMMERCIAL_FREIGHT_TERMS = (
     "грузоперевоз", "вагон", "товар", "отправк", "авиагруз", "склад",
     "портов", "перевозк", "transport document", "consignment note",
     "bill of lading", "air waybill", "e-cmr", "e-awb", "smgs",
-    "транспортн документ", "перевозочн документ", "накладн", "эпд",
+    "транспортн документ", "перевозочн документ", "транспортн накладн", "накладн", "эпд",
     "коносамент", "авианакладн", "смгс", "транзитн деклараци",
 )
 
@@ -379,6 +381,57 @@ PASSENGER_TERMS = (
 MILITARY_TERMS = (
     "military", "weapon", "ammunition", "troops", "battlefield", "frontline",
     "военн", "оруж", "боеприпас", "войск", "фронт", "всу", "ракет",
+)
+
+CRIME_AND_SEIZURE_TERMS = (
+    "cocaine", "heroin", "methamphetamine", "marijuana", "cannabis",
+    "narcotic", "narcotics", "drug bust", "drug seizure", "drug trafficking",
+    "smuggling", "smuggler", "contraband", "cartel", "seized drugs",
+    "кокаин", "героин", "метамфетамин", "марихуан", "каннабис",
+    "наркотик", "наркоторгов", "контрабанд", "тайник", "изъяли наркот",
+    "изъят наркот", "партия наркот", "перевозил наркот",
+)
+
+PERSONAL_INCIDENT_TERMS = (
+    "driver killed", "driver injured", "motorist", "fatal crash",
+    "people killed", "people injured", "car crash", "bus crash",
+    "road accident", "traffic accident", "truck crash",
+    "водитель погиб", "погиб водитель", "водитель пострадал", "пострадал водитель",
+    "погиб человек", "погибли люди", "погиб", "пострадал человек",
+    "пострадали люди", "пострадал", "дтп", "авария с грузовиком",
+    "легковой автомобил", "автобус", "частное лицо", "уголовное дело",
+)
+
+# Military and private-incident stories are allowed only when the text states
+# a direct operational effect on commercial freight infrastructure or routes.
+DIRECT_LOGISTICS_ASSET_TERMS = (
+    "freight route", "shipping route", "trade route", "logistics corridor",
+    "cargo terminal", "freight terminal", "port operations", "port traffic",
+    "rail infrastructure", "rail freight", "freight train", "commercial vessel",
+    "merchant ship", "container ship", "border crossing", "cargo airport",
+    "motorway", "highway", "major road",
+    "грузовой маршрут", "судоходный маршрут", "торговый маршрут",
+    "транспортный коридор", "грузовой терминал", "работа порта",
+    "движение судов", "железнодорожная инфраструктура", "грузовой поезд",
+    "торговое судно", "контейнеровоз", "пункт пропуска", "грузовой аэропорт",
+    "автомагистраль", "федеральная дорога", "трасса", "грузоперевозки",
+)
+
+DIRECT_OPERATIONAL_IMPACT_TERMS = (
+    "closed", "closure", "suspended", "halted", "stopped", "blocked", "shutdown",
+    "disrupted", "damaged", "destroyed", "reroute", "rerouted", "diverted",
+    "delay", "delays", "restriction", "restrictions", "outage", "attack on",
+    "strike on", "traffic stopped", "operations stopped",
+    "закрыт", "закрытие", "приостанов", "останов", "перекрыт",
+    "заблокирован", "нарушена работа", "поврежд", "разруш", "перенаправ",
+    "задерж", "огранич", "атакован", "удар по", "обстрел", "движение прекращено",
+)
+
+NO_OPERATIONAL_IMPACT_TERMS = (
+    "no disruption", "no operational impact", "not affected", "remained open",
+    "without restrictions", "traffic is open", "operations continue normally",
+    "нет влияния", "не повлиял", "не повлияло", "не нарушен", "не нарушена",
+    "не огранич", "без ограничений", "движение открыто", "работает штатно",
 )
 
 COMMENTARY_TERMS = (
@@ -760,6 +813,21 @@ def domain_bonus(domain: str) -> int:
 
 def candidate_score(article: dict) -> int:
     title = clean(article.get("title"))
+    if contains_any(title, CRIME_AND_SEIZURE_TERMS):
+        return -1000
+    if contains_any(title, PASSENGER_TERMS):
+        return -1000
+    if contains_any(title, PERSONAL_INCIDENT_TERMS) and not (
+        contains_any(title, DIRECT_LOGISTICS_ASSET_TERMS)
+        and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
+    ):
+        return -1000
+    if contains_any(title, MILITARY_TERMS) and not (
+        contains_any(title, DIRECT_LOGISTICS_ASSET_TERMS)
+        and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
+    ):
+        return -1000
+
     rule = rule_for(title)
     score = rule.score if rule else 0
     if contains_any(title, PRIORITY_REGION_TERMS):
@@ -803,6 +871,100 @@ def logistics_score(
     return max(0, min(100, score))
 
 
+def concrete_cause(title: str, fact: str) -> str:
+    """Use the article's specific event instead of a generic rule label."""
+    candidate = clean(title)
+    if len(candidate) < 20:
+        candidate = clean(fact)
+    candidate = re.split(r"(?<=[.!?])\s+", candidate, maxsplit=1)[0]
+    candidate = candidate[:280].rstrip(" ,;:-")
+    if candidate and candidate[-1] not in ".!?":
+        candidate += "."
+    return candidate
+
+
+def transport_scope(transports: list[str]) -> str:
+    labels = {
+        "Авто": "автоперевозок",
+        "Ж/д": "железнодорожных перевозок",
+        "Море": "морских перевозок",
+        "Авиа": "авиаперевозок",
+    }
+    if len(transports) == 1:
+        return labels.get(transports[0], "грузовых перевозок")
+    return "грузовых перевозок (" + ", ".join(transports).lower() + ")"
+
+
+def concrete_effect(
+    rule: Rule,
+    text: str,
+    transports: list[str],
+    route: str,
+) -> str:
+    """Describe the operational effect for this transport and route."""
+    scope = f"Для {transport_scope(transports)} по направлению «{route}»"
+    category = rule.cause.lower()
+
+    if "документ" in category:
+        return (
+            f"{scope} нужно проверить новые формы и порядок подачи документов; "
+            "ошибки могут задержать оформление или приём груза."
+        )
+    if "санкцион" in category:
+        return (
+            f"{scope} нужно повторно проверить груз, перевозчика, получателя и расчёты; "
+            "возможны отказ в перевозке или смена маршрута."
+        )
+    if "тариф" in category or "рыночных ставок" in category:
+        return (
+            f"{scope} необходимо пересчитать стоимость новых отправок и проверить "
+            "актуальную ставку у перевозчика."
+        )
+    if "закрытие" in category:
+        return (
+            f"{scope} возможны перенаправление груза, очередь и увеличение срока "
+            "и стоимости доставки."
+        )
+    if "забастов" in category:
+        return (
+            f"{scope} снизится пропускная способность; возможны простой, перенос "
+            "обработки и дополнительные расходы."
+        )
+    if "авария" in category:
+        return (
+            f"{scope} возможны временное ограничение участка, задержка и перенос "
+            "груза на альтернативный маршрут."
+        )
+    if "погод" in category:
+        return (
+            f"{scope} возможны ограничения движения или обработки, пропуск рейсов "
+            "и увеличение транзитного времени."
+        )
+    if "пограничного" in category or "таможенного" in category:
+        return (
+            f"{scope} может увеличиться время оформления; нужно проверить документы, "
+            "ограничения по грузу и доступность перехода."
+        )
+    if "перегрузка инфраструктуры" in category:
+        return (
+            f"{scope} вероятны ожидание свободного слота, простой и дополнительные "
+            "расходы на хранение."
+        )
+    if "расписание" in category or "маршрут" in category:
+        return (
+            f"{scope} нужно проверить новое расписание и доступную ёмкость; возможны "
+            "перенос отправки и изменение срока доставки."
+        )
+    if "безопасност" in category:
+        return (
+            f"{scope} возможны приостановка операций, обход участка, рост страховых "
+            "надбавок и срока доставки."
+        )
+    return (
+        f"{scope} возможны задержка, изменение маршрута и дополнительные расходы."
+    )
+
+
 def article_to_news(article: dict, translator) -> dict | None:
     original_title = clean(article.get("title"))
     language = clean(article.get("language"))
@@ -820,32 +982,29 @@ def article_to_news(article: dict, translator) -> dict | None:
     rule = rule_for(combined)
     transports = transports_for(combined)
 
-    # Exclude passenger-only and military-only stories.  They may contain the
-    # words border, airport, railway or port but do not describe freight impact.
+    # Crime, drugs, baggage and tourism are outside the business-news feed even
+    # when they mention a container, customs office, port or airport.
+    if contains_any(combined, CRIME_AND_SEIZURE_TERMS):
+        return None
+    if contains_any(combined, PASSENGER_TERMS):
+        return None
+
+    has_direct_network_impact = (
+        contains_any(combined, DIRECT_LOGISTICS_ASSET_TERMS)
+        and contains_any(combined, DIRECT_OPERATIONAL_IMPACT_TERMS)
+        and not contains_any(combined, NO_OPERATIONAL_IMPACT_TERMS)
+    )
+    if contains_any(combined, PERSONAL_INCIDENT_TERMS) and not has_direct_network_impact:
+        return None
+    if contains_any(combined, MILITARY_TERMS) and not has_direct_network_impact:
+        return None
+
     has_commercial_context = contains_any(combined, COMMERCIAL_FREIGHT_TERMS)
     is_profile_source = article.get("sourceType") == "profile"
     if not has_commercial_context and not (
         is_profile_source and rule is not None and transports
     ):
         return None
-    if contains_any(combined, PASSENGER_TERMS) and not contains_any(
-        combined,
-        (
-            "freight", "cargo", "container", "truck", "shipping", "goods",
-            "груз", "контейнер", "грузовик", "фур", "товар", "перевозк",
-        ),
-    ):
-        return None
-    if contains_any(combined, MILITARY_TERMS) and not contains_any(
-        combined,
-        (
-            "freight", "cargo", "container", "merchant ship", "commercial vessel",
-            "rail freight", "груз", "контейнер", "торговое судно",
-            "вагон", "грузоперевоз",
-        ),
-    ):
-        return None
-
     if not rule or not transports:
         return None
 
@@ -858,6 +1017,8 @@ def article_to_news(article: dict, translator) -> dict | None:
     excerpt_ru = translate(excerpt, language, translator) if excerpt else ""
     fact = (excerpt_ru if len(excerpt_ru) >= 45 else title_ru)[:700]
     route = route_for(combined, directions, clean(article.get("sourcecountry")))
+    cause = concrete_cause(title_ru, fact)
+    effect = concrete_effect(rule, combined, transports, route)
 
     return {
         "date": date_for(clean(article.get("seendate"))),
@@ -874,8 +1035,8 @@ def article_to_news(article: dict, translator) -> dict | None:
         "title": title_ru,
         "route": route,
         "fact": fact,
-        "cause": rule.cause,
-        "effect": rule.effect,
+        "cause": cause,
+        "effect": effect,
         "sources": [{"name": domain, "url": url}],
         "assessment": f"Алгоритмическая значимость для грузовой логистики: {score}/100",
     }
