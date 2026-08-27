@@ -80,6 +80,22 @@ GENERAL_FREIGHT_RU = (
     '"пункт пропуска" OR авиагруз OR авиаперевозки'
 )
 
+CARRIER_UPDATE_TERMS_EN = (
+    '"customer advisory" OR "customer advisories" OR "operational update" OR '
+    '"operational updates" OR "operations update" OR "service update" OR '
+    '"service updates" OR "service change" OR "booking suspension" OR '
+    '"bookings suspended" OR "blank sailing" OR "port omission" OR rerouting OR '
+    'diversion OR surcharge OR "war risk" OR "local information" OR schedule OR '
+    'documentation OR "dangerous goods"'
+)
+
+CARRIER_UPDATE_TERMS_RU = (
+    '"уведомление клиентам" OR "оперативная информация" OR "изменение сервиса" OR '
+    '"изменение маршрута" OR "изменение расписания" OR "приостановка бронирований" OR '
+    '"приостановка перевозок" OR "пропуск порта" OR перенаправление OR надбавка OR '
+    '"военный риск" OR документы OR "опасные грузы"'
+)
+
 RSS_FEEDS = [
     {
         "label": "foreign",
@@ -110,17 +126,67 @@ RSS_FEEDS = [
         ),
     },
     {
-        "label": "foreign-carriers-indices",
+        "label": "foreign-indices-terminals",
         "language": "English",
         "hl": "en-US",
         "gl": "US",
         "ceid": "US:en",
         "sourceType": "profile",
         "query": (
-            '(site:drewry.co.uk OR site:balticexchange.com OR site:maersk.com OR '
-            'site:msc.com OR site:cma-cgm.com OR site:hapag-lloyd.com OR '
-            'site:dpworld.com) '
+            '(site:drewry.co.uk OR site:balticexchange.com OR site:dpworld.com) '
             '(freight OR cargo OR shipping OR port OR container OR rates OR index) when:1d'
+        ),
+    },
+    {
+        "label": "official-carriers-global-a",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "sourceType": "carrier",
+        "query": (
+            '(site:msc.com OR site:maersk.com OR site:cma-cgm.com OR '
+            'site:hapag-lloyd.com) '
+            f'({CARRIER_UPDATE_TERMS_EN}) when:1d'
+        ),
+    },
+    {
+        "label": "official-carriers-global-b",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "sourceType": "carrier",
+        "query": (
+            '(site:lines.coscoshipping.com OR site:oocl.com OR site:one-line.com OR '
+            'site:evergreen-marine.com) '
+            f'({CARRIER_UPDATE_TERMS_EN}) when:1d'
+        ),
+    },
+    {
+        "label": "official-carriers-global-c",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "sourceType": "carrier",
+        "query": (
+            '(site:hmm21.com OR site:yangming.com OR site:zim.com OR '
+            'site:wanhai.com OR site:pilship.com) '
+            f'({CARRIER_UPDATE_TERMS_EN}) when:1d'
+        ),
+    },
+    {
+        "label": "official-carriers-russia-turkey-china",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "sourceType": "carrier",
+        "query": (
+            '(site:fesco.ru OR site:arkasline.com.tr OR site:turkon.com OR '
+            'site:akkonlines.com OR site:sitc.com) '
+            f'({CARRIER_UPDATE_TERMS_EN} OR {CARRIER_UPDATE_TERMS_RU}) when:1d'
         ),
     },
     {
@@ -336,8 +402,13 @@ RULES = [
     ),
     Rule(
         (
+            "customer advisory", "customer advisories", "operational update",
+            "operational updates", "operations update", "service update",
+            "service updates", "booking suspension", "bookings suspended",
             "blank sailing", "port omission", "service suspension", "service change",
             "schedule change", "route change", "new freight route", "new cargo route",
+            "уведомление клиентам", "оперативная информация",
+            "приостановка бронирований", "бронирования приостановлены",
             "отмена рейса", "пропуск порта", "приостановка сервиса",
             "изменение сервиса", "изменение расписания", "изменение маршрута",
             "новый грузовой маршрут", "запуск грузового маршрута",
@@ -359,7 +430,18 @@ RULES = [
 TRANSPORT_TERMS = {
     "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "e-cmr", "road consignment note", "грузовик", "грузовой автомобил", "грузовые автомобил", "грузовых автомобил", "грузовой транспорт", "автоперевоз", "фур", "автомобильн", "транспортная накладная", "транспортн накладн", "е-cmr"),
     "Ж/д": ("rail", "railway", "railroad", "train", "wagon", "derail", "rail consignment note", "smgs", "cim", "железнодорож", "поезд", "вагон", "ржд", "железнодорожная накладная", "смгс", "цим"),
-    "Море": ("port", "ship", "shipping", "vessel", "maritime", "tanker", "container ship", "container carrier", "container line", "shipping line", "canal", "strait", "sea ", "bill of lading", "ebl", "msc", "порт", "судн", "морск", "танкер", "контейнеровоз", "контейнерн перевозчик", "контейнерн лини", "судоходн компани", "морск лини", "канал", "пролив", "коносамент"),
+    "Море": (
+        "port", "ship", "shipping", "vessel", "maritime", "tanker",
+        "container ship", "container carrier", "container line", "shipping line",
+        "canal", "strait", "sea ", "bill of lading", "ebl",
+        "msc", "maersk", "cma cgm", "cma-cgm", "hapag-lloyd", "hapag lloyd",
+        "cosco", "oocl", "ocean network express", "one line", "evergreen marine",
+        "hmm", "yang ming", "zim", "wan hai", "pil", "fesco", "феско",
+        "arkas", "turkon", "akkon", "sitc",
+        "порт", "судн", "морск", "танкер", "контейнеровоз",
+        "контейнерн перевозчик", "контейнерн лини", "судоходн компани",
+        "морск лини", "канал", "пролив", "коносамент",
+    ),
     "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "air waybill", "e-awb", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "авиарейс", "авианакладн"),
 }
 
@@ -475,10 +557,24 @@ TRUSTED_DOMAINS = {
     "iru.org": 12,
     "fiata.org": 10,
     "wcoomd.org": 12,
-    "maersk.com": 10,
-    "msc.com": 10,
-    "cma-cgm.com": 10,
-    "hapag-lloyd.com": 10,
+    "maersk.com": 18,
+    "msc.com": 18,
+    "cma-cgm.com": 18,
+    "hapag-lloyd.com": 18,
+    "coscoshipping.com": 18,
+    "oocl.com": 18,
+    "one-line.com": 18,
+    "evergreen-marine.com": 18,
+    "hmm21.com": 18,
+    "yangming.com": 18,
+    "zim.com": 18,
+    "wanhai.com": 16,
+    "pilship.com": 16,
+    "fesco.ru": 18,
+    "arkasline.com.tr": 18,
+    "turkon.com": 18,
+    "akkonlines.com": 18,
+    "sitc.com": 16,
     "drewry.co.uk": 12,
     "balticexchange.com": 12,
     "theloadstar.com": 8,
@@ -822,6 +918,20 @@ DUPLICATE_SUBJECT_GROUPS = (
     ("company_maersk", ("maersk", "маерск")),
     ("company_cma_cgm", ("cma cgm", "cma-cgm")),
     ("company_hapag_lloyd", ("hapag lloyd", "hapag-lloyd")),
+    ("company_cosco", ("cosco", "cosco shipping")),
+    ("company_oocl", ("oocl", "orient overseas container line")),
+    ("company_one", ("ocean network express", "one line")),
+    ("company_evergreen", ("evergreen", "evergreen marine")),
+    ("company_hmm", ("hmm", "hyundai merchant marine")),
+    ("company_yang_ming", ("yang ming", "yangming")),
+    ("company_zim", ("zim", "zim integrated shipping")),
+    ("company_wan_hai", ("wan hai", "wanhai")),
+    ("company_pil", ("pil", "pacific international lines")),
+    ("company_fesco", ("fesco", "феско")),
+    ("company_arkas", ("arkas", "arkas line")),
+    ("company_turkon", ("turkon", "turkon line")),
+    ("company_akkon", ("akkon", "akkon lines")),
+    ("company_sitc", ("sitc", "sitc international")),
     ("company_rzd", ("rzd", "ржд", "russian railways")),
     ("place_novorossiysk", ("novorossiysk", "новороссийск")),
     ("place_jebel_ali", ("jebel ali", "jebel-ali", "джебель али", "джебель-али")),
@@ -1039,6 +1149,7 @@ def domain_bonus(domain: str) -> int:
 
 def candidate_score(article: dict) -> int:
     title = clean(article.get("title"))
+    is_carrier_source = article.get("sourceType") == "carrier"
     if contains_any(title, CRIME_AND_SEIZURE_TERMS):
         return -1000
     if contains_any(title, PASSENGER_TERMS):
@@ -1053,9 +1164,13 @@ def candidate_score(article: dict) -> int:
         and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
     ):
         return -1000
-    if contains_any(title, MILITARY_TERMS) and not (
-        contains_any(title, DIRECT_LOGISTICS_ASSET_TERMS)
-        and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
+    if (
+        contains_any(title, MILITARY_TERMS)
+        and not is_carrier_source
+        and not (
+            contains_any(title, DIRECT_LOGISTICS_ASSET_TERMS)
+            and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
+        )
     ):
         return -1000
 
@@ -1065,7 +1180,11 @@ def candidate_score(article: dict) -> int:
         score += 15
     domain = source_name(clean(article.get("url")), clean(article.get("domain")))
     score += domain_bonus(domain)
-    if article.get("sourceType") == "profile":
+    if article.get("sourceType") == "carrier":
+        # An operational notice from the carrier is the primary source and
+        # should outrank media rewrites of the same event.
+        score += 24
+    elif article.get("sourceType") == "profile":
         score += 8
     elif article.get("sourceType") == "documents":
         score += 10
@@ -1258,7 +1377,11 @@ def specific_event_details(
         and contains_any(lowered, ("novorossiysk", "новороссийск"))
         and contains_any(
             lowered,
-            ("suspend", "halt", "booking", "приостанов", "бронирован"),
+            (
+                "suspend", "suspends", "suspended", "halt", "halts", "halted",
+                "booking", "bookings", "stopped accepting bookings",
+                "приостанов", "бронирован",
+            ),
         )
     ):
         return {
@@ -1442,6 +1565,9 @@ def article_to_news(article: dict, translator) -> dict | None:
 
     rule = rule_for(combined)
     transports = transports_for(combined)
+    is_carrier_source = article.get("sourceType") == "carrier"
+    if is_carrier_source and not transports:
+        transports = ["Море"]
 
     # Crime, drugs, baggage and tourism are outside the business-news feed even
     # when they mention a container, customs office, port or airport.
@@ -1462,11 +1588,15 @@ def article_to_news(article: dict, translator) -> dict | None:
     )
     if contains_any(combined, PERSONAL_INCIDENT_TERMS) and not has_direct_network_impact:
         return None
-    if contains_any(combined, MILITARY_TERMS) and not has_direct_network_impact:
+    if (
+        contains_any(combined, MILITARY_TERMS)
+        and not has_direct_network_impact
+        and not is_carrier_source
+    ):
         return None
 
     has_commercial_context = contains_any(combined, COMMERCIAL_FREIGHT_TERMS)
-    is_profile_source = article.get("sourceType") == "profile"
+    is_profile_source = article.get("sourceType") in {"profile", "carrier"}
     if not has_commercial_context and not (
         is_profile_source and rule is not None and transports
     ):
