@@ -738,15 +738,192 @@ def normalize_title(title: str) -> str:
     return re.sub(r"[^a-zа-яё0-9]+", " ", title.lower()).strip()
 
 
+DUPLICATE_EVENT_GROUPS = (
+    (
+        "event_suspend",
+        (
+            "suspend", "suspends", "suspended", "suspension",
+            "halt", "halts", "halted", "pause", "pauses", "paused",
+            "stop bookings", "stopped bookings", "pause bookings",
+            "приостанов", "остановил бронирован", "прекратил перевоз",
+        ),
+    ),
+    (
+        "event_close",
+        (
+            "closed", "closure", "shutdown", "blocked", "blockade",
+            "закрыт", "закрытие", "перекрыт", "блокад",
+        ),
+    ),
+    (
+        "event_attack",
+        (
+            "attack", "drone strike", "missile strike", "struck",
+            "атак", "удар бпла", "удар дрон", "ракетный удар",
+        ),
+    ),
+    (
+        "event_delay",
+        (
+            "delay", "delayed", "disruption", "reroute", "diverted",
+            "задерж", "сбой", "перенаправ", "обход маршрут",
+        ),
+    ),
+    (
+        "event_congestion",
+        (
+            "congestion", "backlog", "queue", "vessels gather", "ships gather",
+            "tankers gather", "vessels gathered", "ships gathered", "tankers gathered",
+            "перегрузк", "очеред", "скопил", "скопление",
+        ),
+    ),
+    (
+        "event_tariff",
+        (
+            "tariff", "freight rate", "surcharge", "rate increase", "rate cut",
+            "тариф", "ставка фрахт", "ставки фрахт", "надбавк",
+        ),
+    ),
+    (
+        "event_documents",
+        (
+            "transport document", "consignment note", "bill of lading",
+            "customs declaration", "maritime single window",
+            "транспортн документ", "накладн", "коносамент", "деклараци",
+            "единое морское окно",
+        ),
+    ),
+    (
+        "event_sanctions",
+        (
+            "sanction", "export ban", "import ban", "trade ban",
+            "санкц", "запрет экспорт", "запрет импорт",
+        ),
+    ),
+    (
+        "event_accident",
+        (
+            "accident", "collision", "derailment", "fire", "explosion",
+            "авари", "столкнов", "крушен", "сход вагон", "пожар", "взрыв",
+        ),
+    ),
+    (
+        "event_ranking",
+        (
+            "ranking", "top 30", "top-30", "fell out of the top",
+            "рейтинг", "топ 30", "топ-30", "покинул топ", "выпал из топ",
+        ),
+    ),
+)
+
+
+DUPLICATE_SUBJECT_GROUPS = (
+    ("company_msc", ("msc", "mediterranean shipping company")),
+    ("company_maersk", ("maersk", "маерск")),
+    ("company_cma_cgm", ("cma cgm", "cma-cgm")),
+    ("company_hapag_lloyd", ("hapag lloyd", "hapag-lloyd")),
+    ("company_rzd", ("rzd", "ржд", "russian railways")),
+    ("place_novorossiysk", ("novorossiysk", "новороссийск")),
+    ("place_jebel_ali", ("jebel ali", "jebel-ali", "джебель али", "джебель-али")),
+    ("place_sri_lanka", ("sri lanka", "шри ланк", "шри-ланк")),
+    ("place_vanuatu", ("vanuatu", "вануату")),
+    ("place_persian_gulf", ("persian gulf", "персидский залив")),
+    ("place_hormuz", ("hormuz", "ормуз")),
+    ("place_suez", ("suez", "суэц")),
+    ("place_black_sea", ("black sea", "черное море", "чёрное море")),
+    ("country_iran", ("iran", "iranian", "иран")),
+    ("subject_container", ("container", "containers", "containership", "containerships", "контейнер")),
+    ("subject_tanker", ("tanker", "tankers", "танкер")),
+    ("subject_rail", ("rail", "railway", "железнодорож", "поезд", "вагон")),
+    ("subject_port", ("port", "ports", "порт")),
+)
+
+
+DUPLICATE_STOP_WORDS = {
+    "about", "after", "again", "amid", "from", "into", "over", "through",
+    "world", "worlds", "largest", "major", "new", "news", "says", "the",
+    "with", "больше", "всего", "крупнейший", "мира", "новый", "новые",
+    "после", "через", "сказал", "сообщил", "сообщает", "свои", "свою",
+}
+
+
+DUPLICATE_IGNORE_STEMS = (
+    "приостанов", "перевоз", "брониров", "рейс", "перевозчик",
+    "suspend", "halt", "booking", "shipment", "shipping", "transport",
+)
+
+
+def duplicate_signature(title: str) -> tuple[set[str], set[str]]:
+    """Return canonical event labels and identity tokens for a headline."""
+    lowered = normalize_title(title)
+    events = {
+        label
+        for label, terms in DUPLICATE_EVENT_GROUPS
+        if any(has_term(lowered, term) for term in terms)
+    }
+    identities = {
+        label
+        for label, terms in DUPLICATE_SUBJECT_GROUPS
+        if any(has_term(lowered, term) for term in terms)
+    }
+
+    # Preserve uncommon words as a fallback for companies and locations that
+    # are not yet in the explicit dictionaries.
+    for token in lowered.split():
+        if len(token) < 4 or token in DUPLICATE_STOP_WORDS:
+            continue
+        if any(stem in token for stem in DUPLICATE_IGNORE_STEMS):
+            continue
+        identities.add(token)
+
+    return events, identities
+
+
 def is_duplicate(title: str, accepted: Iterable[str]) -> bool:
     normalized = normalize_title(title)
     if not normalized:
         return True
+    title_events, title_identities = duplicate_signature(title)
     for other in accepted:
         other_normalized = normalize_title(other)
         if normalized == other_normalized:
             return True
         if SequenceMatcher(None, normalized, other_normalized).ratio() >= 0.84:
+            return True
+
+        other_events, other_identities = duplicate_signature(other)
+        shared_events = title_events & other_events
+        canonical_prefixes = ("company_", "place_", "country_", "subject_")
+        title_canonical = {
+            token
+            for token in title_identities
+            if token.startswith(canonical_prefixes)
+        }
+        other_canonical = {
+            token
+            for token in other_identities
+            if token.startswith(canonical_prefixes)
+        }
+        shared_canonical = title_canonical & other_canonical
+        smaller_canonical_count = min(
+            len(title_canonical),
+            len(other_canonical),
+        )
+        canonical_overlap = (
+            len(shared_canonical) / smaller_canonical_count
+            if smaller_canonical_count
+            else 0.0
+        )
+
+        # Different wording and even different languages still describe one
+        # event when the action and at least two concrete subjects/locations
+        # match.  The overlap guard prevents unrelated MSC or RZD stories from
+        # collapsing merely because they mention the same operator.
+        if (
+            shared_events
+            and len(shared_canonical) >= 2
+            and canonical_overlap >= 0.65
+        ):
             return True
     return False
 
