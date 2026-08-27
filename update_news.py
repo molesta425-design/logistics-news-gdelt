@@ -718,6 +718,9 @@ def clean(value: object) -> str:
 def has_term(lowered_text: str, term: str) -> bool:
     """Match English words exactly and Russian stems by substring."""
     normalized = term.strip().lower()
+    if normalized == "ес":
+        # The EU abbreviation must not match inside words such as «перенести».
+        return re.search(r"(?<![а-яё])ес(?![а-яё])", lowered_text) is not None
     if re.fullmatch(r"[a-z0-9 -]+", normalized):
         pattern = r"(?<![a-z0-9])" + re.escape(normalized) + r"(?![a-z0-9])"
         return re.search(pattern, lowered_text) is not None
@@ -1456,6 +1459,99 @@ def concrete_cause(article_text: str, title: str, summary: str) -> str:
     return UNKNOWN_CAUSE
 
 
+def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
+    """Describe the concrete trigger named in a short RSS headline.
+
+    Google News often exposes only a headline.  This fallback uses only an
+    event, operator and route that are explicitly present in that headline;
+    it never invents an underlying political or commercial motive.
+    """
+    lowered = clean(text).lower()
+    operator = next(
+        (
+            label
+            for label, terms in (
+                ("MSC", ("msc", "mediterranean shipping company")),
+                ("Maersk", ("maersk", "маерск")),
+                ("CMA CGM", ("cma cgm", "cma-cgm")),
+                ("Hapag-Lloyd", ("hapag lloyd", "hapag-lloyd")),
+                ("COSCO", ("cosco", "cosco shipping")),
+                ("OOCL", ("oocl",)),
+                ("ONE", ("ocean network express", "one line")),
+                ("Evergreen", ("evergreen", "evergreen marine")),
+                ("HMM", ("hmm", "hyundai merchant marine")),
+                ("Yang Ming", ("yang ming", "yangming")),
+                ("ZIM", ("zim", "zim integrated shipping")),
+                ("Wan Hai", ("wan hai", "wanhai")),
+                ("PIL", ("pil", "pacific international lines")),
+                ("FESCO", ("fesco", "феско")),
+                ("РЖД", ("rzd", "ржд")),
+                ("БЖД", ("belarusian railway", "бжд", "белорусская железная дорога")),
+            )
+            if any(has_term(lowered, term) for term in terms)
+        ),
+        "",
+    )
+
+    route = clean(route)
+    specific_route = bool(
+        route
+        and route != "Международные грузовые маршруты"
+        and not route.startswith("Регион источника:")
+    )
+    if not operator and not specific_route:
+        return UNKNOWN_CAUSE
+
+    where = f" на направлении «{route}»" if specific_route else ""
+
+    if contains_any(
+        lowered,
+        ("drought", "low water", "low river", "засух", "низк уровень вод", "обмел"),
+    ):
+        return finish_sentence(f"Засуха и снижение уровня воды ограничили перевозки{where}")
+    if contains_any(
+        lowered,
+        ("storm", "typhoon", "hurricane", "cyclone", "flood", "шторм", "тайфун", "ураган", "циклон", "наводнен"),
+    ):
+        return finish_sentence(f"Неблагоприятные погодные условия нарушили грузовые операции{where}")
+    if contains_any(
+        lowered,
+        ("attack", "drone", "missile", "атак", "бпла", "беспилот", "дрон", "ракет"),
+    ):
+        return finish_sentence(f"Атака затронула коммерческий транспортный объект{where}")
+    if contains_any(lowered, ("strike", "walkout", "забастов", "стачк")):
+        return finish_sentence(f"Забастовка работников сократила работу транспортной инфраструктуры{where}")
+    if contains_any(lowered, ("sanction", "export ban", "import ban", "санкц", "запрет экспорт", "запрет импорт")):
+        return finish_sentence(f"Введение санкционных или торговых ограничений изменило условия перевозок{where}")
+    if contains_any(lowered, ("accident", "collision", "derailment", "fire", "explosion", "авари", "столкнов", "крушен", "пожар", "взрыв")):
+        return finish_sentence(f"Авария или повреждение транспортной инфраструктуры нарушили движение{where}")
+    if contains_any(lowered, ("congestion", "backlog", "queue", "перегрузк", "очеред", "скоплен")):
+        return finish_sentence(f"Скопление грузов или транспорта снизило пропускную способность{where}")
+    if contains_any(lowered, ("transport document", "consignment note", "bill of lading", "customs declaration", "транспортн документ", "накладн", "коносамент", "деклараци", "эпд")):
+        return finish_sentence(f"Новые требования к транспортным или таможенным документам изменили оформление{where}")
+    if contains_any(lowered, ("customs", "border", "checkpoint", "тамож", "границ", "пункт пропуска")):
+        return finish_sentence(f"Изменение режима таможенного или пограничного контроля повлияло на оформление{where}")
+    if contains_any(lowered, ("tariff", "surcharge", "freight rate", "тариф", "надбавк", "ставк фрахт")):
+        return finish_sentence(f"Изменение тарифа, ставки или надбавки увеличило стоимость новых отправок{where}")
+    if contains_any(lowered, ("closed", "closure", "suspend", "suspended", "shutdown", "закрыт", "приостанов", "перекрыт")):
+        action = (
+            f"Решение {operator} приостановить сервис"
+            if operator
+            else "Приостановка сервиса или доступа к инфраструктуре"
+        )
+        return finish_sentence(f"{action} ограничила перевозки{where}")
+    if contains_any(lowered, ("reroute", "rerouted", "divert", "schedule change", "route change", "перенаправ", "изменение маршрута", "изменение расписания")):
+        action = (
+            f"Решение {operator} изменить маршрут или расписание"
+            if operator
+            else "Изменение маршрута или расписания"
+        )
+        return finish_sentence(f"{action} затронуло грузовые отправки{where}")
+    if contains_any(lowered, ("delay", "disruption", "restriction", "задерж", "сбой", "огранич")):
+        return finish_sentence(f"Операционное ограничение нарушило грузовое сообщение{where}")
+    return UNKNOWN_CAUSE
+
+
 def transport_scope(transports: list[str]) -> str:
     labels = {
         "Авто": "автоперевозок",
@@ -1751,8 +1847,14 @@ def article_to_news(article: dict, translator) -> dict | None:
         title_ru,
         summary,
     )
-    # A generic "cause not stated" card is not actionable.  Keep only events
-    # whose source text lets us identify what actually triggered the impact.
+    if cause == UNKNOWN_CAUSE:
+        cause = event_cause_from_evidence(
+            rule,
+            f"{combined} {title_ru} {article_text_ru}",
+            route,
+        )
+    # A generic "cause not stated" card is not actionable.  The fallback
+    # above still requires a named event plus an operator or concrete route.
     if cause == UNKNOWN_CAUSE:
         return None
     effect = event_details.get("effect") or concrete_effect(
