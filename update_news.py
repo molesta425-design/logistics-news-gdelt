@@ -172,9 +172,23 @@ RSS_FEEDS = [
         "sourceType": "profile",
         "query": (
             '(site:seanews.ru OR site:portnews.ru OR site:morvesti.ru OR '
-            'site:logirus.ru OR site:ati.su) '
+            'site:logirus.ru OR site:infranews.ru OR site:rzd-partner.ru OR '
+            'site:ati.su) '
             '(груз OR перевозки OR порт OR контейнер OR железная дорога OR '
             'таможня OR ставки OR индекс OR документы) when:1d'
+        ),
+    },
+    {
+        "label": "russian-customs-tks",
+        "language": "Russian",
+        "hl": "ru",
+        "gl": "RU",
+        "ceid": "RU:ru",
+        "sourceType": "documents",
+        "query": (
+            'site:tks.ru ("таможенное законодательство" OR "таможенное оформление" OR '
+            'пошлина OR тариф OR декларация OR "ТН ВЭД" OR "электронные документы" OR '
+            '"транспортные документы") -кокаин -наркотики -багаж -контрабанда when:1d'
         ),
     },
     {
@@ -475,6 +489,9 @@ TRUSTED_DOMAINS = {
     "seanews.ru": 8,
     "morvesti.ru": 8,
     "logirus.ru": 8,
+    "infranews.ru": 8,
+    "tks.ru": 10,
+    "rzd-partner.ru": 10,
     "ati.su": 6,
 }
 
