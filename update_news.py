@@ -35,6 +35,7 @@ RSS_RETRY_DELAY = 10
 RSS_INTER_FEED_DELAY = 2
 NEWS_WINDOW_HOURS = 24
 MAX_FUTURE_SKEW_MINUTES = 10
+UNKNOWN_CAUSE = "Причина в публикации не указана."
 
 RISK_TERMS_EN = (
     "closure OR closed OR strike OR tariff OR sanction OR congestion OR "
@@ -624,12 +625,70 @@ REGIONS = [
 # continent.  These labels are checked before the generic regional list.
 SPECIFIC_ROUTES = [
     (("novorossiysk", "новороссийск"), "порт Новороссийск — Чёрное море"),
+    (("rhine", "рейн"), "Рейн — Германия — порты ARA"),
+    (("danube", "дунай"), "Дунай — Центральная и Юго-Восточная Европа"),
     (("jebel ali", "jebel-ali", "джебель-али", "джебель али"), "порт Джебель-Али — Персидский залив"),
     (("sri lanka", "шри-ланк", "шри ланк"), "Шри-Ланка — Индийский океан"),
     (("vanuatu", "вануату"), "порты Вануату — Тихий океан"),
     (("persian gulf", "персидск"), "Персидский залив"),
     (("iranian port", "ports of iran", "иранские порт", "порты ирана"), "Иран — Персидский залив"),
 ]
+
+
+EVENT_GEOGRAPHY_TERMS = (
+    ("Беларусь", ("belarus", "belarusian", "беларус", "минск", "брест")),
+    ("Россия", ("russia", "russian", "росси", "москва", "ржд")),
+    ("Турция", ("turkey", "turkish", "türkiye", "турц", "стамбул")),
+    ("Китай", ("china", "chinese", "китай", "пекин", "шанхай")),
+    (
+        "Германия",
+        (
+            "germany", "german", "deutschland", "deutsche", "герман",
+            "vda", "bundesbank", "bmv", "rhine", "рейн", "дуйсбург",
+            "кёльн", "кауб",
+        ),
+    ),
+    ("Австрия", ("austria", "austrian", "австри", "vienna", "вена")),
+    ("Польша", ("poland", "polish", "польш", "варшав")),
+    ("Казахстан", ("kazakhstan", "kazakh", "казахстан", "астана", "алматы")),
+    ("Нидерланды", ("netherlands", "dutch", "нидерланд", "роттердам")),
+    ("Бельгия", ("belgium", "belgian", "бельги", "антверпен")),
+    ("Франция", ("france", "french", "франц", "марсель")),
+    ("Италия", ("italy", "italian", "итали", "генуя", "триест")),
+    ("Испания", ("spain", "spanish", "испани", "валенсия", "барселона")),
+    ("Великобритания", ("united kingdom", "britain", "british", "великобрит", "лондон")),
+    ("США", ("united states", "u.s.", "usa", "американ", "сша")),
+    ("Канада", ("canada", "canadian", "канад")),
+    ("ОАЭ", ("united arab emirates", "uae", "оаэ", "jebel ali", "джебель али")),
+    ("Иран", ("iran", "iranian", "иран")),
+    ("Индия", ("india", "indian", "инди")),
+    ("Япония", ("japan", "japanese", "япони")),
+    ("Южная Корея", ("south korea", "korean", "южная корея", "корей")),
+    ("Шри-Ланка", ("sri lanka", "шри-ланк", "шри ланк")),
+    ("Вануату", ("vanuatu", "вануату")),
+    ("Панама", ("panama", "панам")),
+    ("Египет", ("egypt", "egyptian", "егип", "suez", "суэц")),
+)
+
+
+GEOGRAPHY_ROUTE_FALLBACKS = {
+    "Беларусь": "Беларусь — международные грузовые направления",
+    "Россия": "Россия — международные грузовые направления",
+    "Турция": "Турция — международные грузовые направления",
+    "Китай": "Китай — международные грузовые направления",
+    "Германия": "Германия — европейские грузовые направления",
+    "Австрия": "Австрия — европейские грузовые направления",
+    "Польша": "Польша — европейские грузовые направления",
+    "Казахстан": "Казахстан — международные грузовые направления",
+    "Нидерланды": "Нидерланды — европейские портовые направления",
+    "Бельгия": "Бельгия — европейские портовые направления",
+    "ОАЭ": "ОАЭ — Персидский залив",
+    "Иран": "Иран — Персидский залив",
+    "Шри-Ланка": "Шри-Ланка — Индийский океан",
+    "Вануату": "Вануату — Тихий океан",
+    "Панама": "Панамский канал — международный транзит",
+    "Египет": "Египет — Суэцкий канал",
+}
 
 
 def clean(value: object) -> str:
@@ -1075,7 +1134,29 @@ def directions_for(text: str) -> list[str]:
     return result or ["Другие"]
 
 
-def route_for(text: str, directions: list[str], source_country: str) -> str:
+def event_geography_for(text: str, source_country: str = "") -> str:
+    """Return the location affected by the event, not the publisher country."""
+    lowered = clean(text).lower()
+    locations: list[str] = []
+    for label, terms in EVENT_GEOGRAPHY_TERMS:
+        if any(has_term(lowered, term) for term in terms):
+            locations.append(label)
+
+    if locations:
+        # Two locations are enough to explain a cross-border event without
+        # turning the card label into another headline.
+        return " / ".join(locations[:2])
+
+    source_country = clean(source_country)
+    return source_country or "Международная"
+
+
+def route_for(
+    text: str,
+    directions: list[str],
+    source_country: str,
+    event_geography: str = "",
+) -> str:
     lowered = text.lower()
     specific_route = next(
         (
@@ -1098,6 +1179,11 @@ def route_for(text: str, directions: list[str], source_country: str) -> str:
     for terms, label in REGIONS:
         if any(has_term(lowered, term) for term in terms):
             return label
+    event_geography = clean(event_geography)
+    if event_geography and event_geography != "Международная":
+        if event_geography in GEOGRAPHY_ROUTE_FALLBACKS:
+            return GEOGRAPHY_ROUTE_FALLBACKS[event_geography]
+        return f"{event_geography} — международные грузовые направления"
     source_country = clean(source_country)
     return f"Регион источника: {source_country}" if source_country else "Международные грузовые маршруты"
 
@@ -1343,7 +1429,7 @@ def concrete_cause(article_text: str, title: str, summary: str) -> str:
             candidate = finish_sentence(match.group(1), limit=220)
             if sentence_similarity(candidate, summary) < 0.82:
                 return candidate
-    return "Причина в публикации не указана."
+    return UNKNOWN_CAUSE
 
 
 def transport_scope(transports: list[str]) -> str:
@@ -1611,7 +1697,14 @@ def article_to_news(article: dict, translator) -> dict | None:
 
     title_ru = translate(original_title, language, translator)
     article_text_ru = translate(excerpt, language, translator) if excerpt else ""
-    route = route_for(combined, directions, clean(article.get("sourcecountry")))
+    source_country = clean(article.get("sourcecountry"))
+    event_geography = event_geography_for(combined, source_country)
+    route = route_for(
+        combined,
+        directions,
+        source_country,
+        event_geography,
+    )
     event_details = specific_event_details(
         combined,
         title_ru,
@@ -1630,6 +1723,10 @@ def article_to_news(article: dict, translator) -> dict | None:
         title_ru,
         summary,
     )
+    # A generic "cause not stated" card is not actionable.  Keep only events
+    # whose source text lets us identify what actually triggered the impact.
+    if cause == UNKNOWN_CAUSE:
+        return None
     effect = event_details.get("effect") or concrete_effect(
         rule,
         combined,
@@ -1650,6 +1747,8 @@ def article_to_news(article: dict, translator) -> dict | None:
         "transports": transports,
         "directions": directions,
         "title": title_ru,
+        "country": event_geography,
+        "eventCountry": event_geography,
         "route": route,
         "summary": summary,
         "fact": summary,
@@ -1795,8 +1894,9 @@ def build_feed(articles: list[dict]) -> dict:
             "места заполняются лучшими новостями из другой группы. "
             "Новости получены из общего RSS-поиска Google News и дополнительных "
             "поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен "
-            "локальной открытой моделью. Суть и причина извлекаются из публикации; "
-            "если причина не названа, это указывается прямо. Последствие и важность — "
+            "локальной открытой моделью. География события, суть и конкретная причина "
+            "извлекаются из публикации; материалы без установленной причины исключаются. "
+            "Последствие и важность — "
             "алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник."
         ),
         "news": news,
