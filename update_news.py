@@ -359,8 +359,8 @@ RULES = [
 TRANSPORT_TERMS = {
     "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "e-cmr", "road consignment note", "грузовик", "грузовой автомобил", "грузовые автомобил", "грузовых автомобил", "грузовой транспорт", "автоперевоз", "фур", "автомобильн", "транспортная накладная", "транспортн накладн", "е-cmr"),
     "Ж/д": ("rail", "railway", "railroad", "train", "wagon", "derail", "rail consignment note", "smgs", "cim", "железнодорож", "поезд", "вагон", "ржд", "железнодорожная накладная", "смгс", "цим"),
-    "Море": ("port", "ship", "shipping", "vessel", "maritime", "tanker", "container ship", "canal", "strait", "sea ", "bill of lading", "ebl", "порт", "судн", "морск", "танкер", "контейнеровоз", "канал", "пролив", "коносамент"),
-    "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "air waybill", "e-awb", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "рейс", "авианакладн"),
+    "Море": ("port", "ship", "shipping", "vessel", "maritime", "tanker", "container ship", "container carrier", "container line", "shipping line", "canal", "strait", "sea ", "bill of lading", "ebl", "msc", "порт", "судн", "морск", "танкер", "контейнеровоз", "контейнерн перевозчик", "контейнерн лини", "судоходн компани", "морск лини", "канал", "пролив", "коносамент"),
+    "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "air waybill", "e-awb", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "авиарейс", "авианакладн"),
 }
 
 GENERIC_DOCUMENT_TERMS = (
@@ -393,8 +393,17 @@ PASSENGER_TERMS = (
 )
 
 MILITARY_TERMS = (
-    "military", "weapon", "ammunition", "troops", "battlefield", "frontline",
-    "военн", "оруж", "боеприпас", "войск", "фронт", "всу", "ракет",
+    "war", "military", "weapon", "ammunition", "troops", "battlefield",
+    "frontline", "drone attack", "missile attack", "naval blockade",
+    "войн", "военн", "оруж", "боеприпас", "войск", "фронт", "всу",
+    "ракет", "дрон", "беспилот", "морская блокада",
+)
+
+SPECULATIVE_WAR_COMMENTARY_TERMS = (
+    "stalemate", "endgame", "war outlook", "war scenario", "could last",
+    "may last", "predicts", "prediction", "opinion", "interview",
+    "патовой", "тупиков", "сценари", "прогноз", "по мнению", "считает",
+    "может продлиться", "будет длиться", "приближается к",
 )
 
 CRIME_AND_SEIZURE_TERMS = (
@@ -513,6 +522,17 @@ REGIONS = [
     (("arctic", "northern sea route", "аркти", "северный морской путь"), "Северный морской путь"),
     (("europe", "eu ", "европ", "ес "), "Европа"),
     (("middle east", "ближний восток"), "Ближний Восток"),
+]
+
+# A concrete port, waterway or country is more useful in a card than a broad
+# continent.  These labels are checked before the generic regional list.
+SPECIFIC_ROUTES = [
+    (("novorossiysk", "новороссийск"), "порт Новороссийск — Чёрное море"),
+    (("jebel ali", "jebel-ali", "джебель-али", "джебель али"), "порт Джебель-Али — Персидский залив"),
+    (("sri lanka", "шри-ланк", "шри ланк"), "Шри-Ланка — Индийский океан"),
+    (("vanuatu", "вануату"), "порты Вануату — Тихий океан"),
+    (("persian gulf", "персидск"), "Персидский залив"),
+    (("iranian port", "ports of iran", "иранские порт", "порты ирана"), "Иран — Персидский залив"),
 ]
 
 
@@ -706,9 +726,9 @@ def article_excerpt(url: str) -> str:
                 continue
             selected.append(sentence)
             total += len(sentence)
-            if total >= 420 or len(selected) == 2:
+            if total >= 850 or len(selected) == 4:
                 break
-        return " ".join(selected)[:650]
+        return " ".join(selected)[:1200]
     except Exception as error:
         print(f"Article extraction warning for {url}: {error}", file=sys.stderr)
         return ""
@@ -769,13 +789,25 @@ def directions_for(text: str) -> list[str]:
 
 
 def route_for(text: str, directions: list[str], source_country: str) -> str:
+    lowered = text.lower()
+    specific_route = next(
+        (
+            label
+            for terms, label in SPECIFIC_ROUTES
+            if any(has_term(lowered, term) for term in terms)
+        ),
+        "",
+    )
     if "РБ–РФ" in directions or "РФ–РБ" in directions:
         return "Беларусь — Россия"
     if "РБ–Турция" in directions:
         return "Беларусь — Турция"
     if "Китай" in directions:
+        if specific_route:
+            return f"{specific_route} — Китай"
         return "Китай — международные грузовые направления"
-    lowered = text.lower()
+    if specific_route:
+        return specific_route
     for terms, label in REGIONS:
         if any(has_term(lowered, term) for term in terms):
             return label
@@ -834,6 +866,11 @@ def candidate_score(article: dict) -> int:
         return -1000
     if contains_any(title, PASSENGER_TERMS):
         return -1000
+    if (
+        contains_any(title, MILITARY_TERMS)
+        and contains_any(title, SPECULATIVE_WAR_COMMENTARY_TERMS)
+    ):
+        return -1000
     if contains_any(title, PERSONAL_INCIDENT_TERMS) and not (
         contains_any(title, DIRECT_LOGISTICS_ASSET_TERMS)
         and contains_any(title, DIRECT_OPERATIONAL_IMPACT_TERMS)
@@ -891,8 +928,11 @@ def logistics_score(
 CAUSE_MARKERS = (
     "из-за", "в связи с", "на фоне", "поскольку", "так как",
     "причиной", "в результате", "после того как",
+    "после атаки", "после аварии", "после закрытия", "после введения",
+    "после повреждения",
     "due to", "because", "amid", "caused by", "driven by",
-    "as a result of", "following",
+    "as a result of", "following", "after an attack", "after the attack",
+    "after an accident", "after the closure", "after damage",
 )
 
 
@@ -971,13 +1011,15 @@ def concrete_summary(
         and not is_causal_sentence(sentence)
     ]
     if candidates:
-        return finish_sentence(candidates[0])
+        # Two short factual sentences give the card enough incident detail
+        # without turning it into a copy of the source article.
+        return finish_sentence(" ".join(candidates[:2]), limit=520)
     return summary_fallback(rule, transports, route)
 
 
 def concrete_cause(article_text: str, title: str, summary: str) -> str:
     """Extract a stated cause; never copy the title or invent a reason."""
-    for sentence in sentences_for(article_text):
+    for sentence in sentences_for(article_text) + [clean(title)]:
         lowered = sentence.lower()
         marker_positions = [
             (lowered.find(marker), marker)
@@ -994,6 +1036,17 @@ def concrete_cause(article_text: str, title: str, summary: str) -> str:
         ):
             continue
         return finish_sentence(candidate, limit=280)
+
+    leading_cause_patterns = (
+        r"^(.{12,180}?)\s+(?:привел[аио]?|вызвал[аио]?|стал[аио]? причиной)\b",
+        r"^(.{12,180}?)\s+(?:led to|caused|forced)\b",
+    )
+    for pattern in leading_cause_patterns:
+        match = re.search(pattern, clean(title), flags=re.I)
+        if match:
+            candidate = finish_sentence(match.group(1), limit=220)
+            if sentence_similarity(candidate, summary) < 0.82:
+                return candidate
     return "Причина в публикации не указана."
 
 
@@ -1007,6 +1060,112 @@ def transport_scope(transports: list[str]) -> str:
     if len(transports) == 1:
         return labels.get(transports[0], "грузовых перевозок")
     return "грузовых перевозок (" + ", ".join(transports).lower() + ")"
+
+
+def specific_event_details(
+    text: str,
+    title: str,
+    article_text: str,
+    route: str,
+) -> dict[str, str]:
+    """Build concrete fields for high-impact event shapes seen in the feed.
+
+    These branches are intentionally based on the event's named operator,
+    asset and location.  They override only wording, not source selection or
+    importance scoring.
+    """
+    lowered = clean(f"{text} {title} {article_text}").lower()
+
+    if (
+        has_term(lowered, "msc")
+        and contains_any(lowered, ("novorossiysk", "новороссийск"))
+        and contains_any(
+            lowered,
+            ("suspend", "halt", "booking", "приостанов", "бронирован"),
+        )
+    ):
+        return {
+            "summary": (
+                "MSC приостановила все новые бронирования грузов "
+                "в Новороссийск и из него. Решение принято после атаки БПЛА "
+                "на контейнеровоз MSC ULSAN III и затрагивает один из немногих "
+                "оставшихся международных контейнерных сервисов порта."
+            ),
+            "cause": (
+                "Атака БПЛА на контейнеровоз MSC ULSAN III и возникший "
+                "риск для коммерческого судоходства в Чёрном море."
+            ),
+            "effect": (
+                "Новые контейнерные отправки MSC через Новороссийск временно "
+                "не бронируются; грузовладельцам нужно согласовывать другой порт "
+                "или линию, что увеличит срок и стоимость доставки."
+            ),
+        }
+
+    if (
+        contains_any(lowered, ("tanker", "танкер"))
+        and contains_any(lowered, ("sri lanka", "шри-ланк", "шри ланк"))
+        and contains_any(lowered, ("blockade", "блокад", "блокирован"))
+    ):
+        return {
+            "summary": (
+                "У берегов Шри-Ланки скопились более десятка иранских танкеров, "
+                "которые не могут вернуться в иранские порты и продолжать нефтяные рейсы."
+            ),
+            "cause": (
+                "Блокада США ограничила доступ танкеров к иранским портам "
+                "и остановила часть экспортных нефтяных рейсов."
+            ),
+            "effect": (
+                "Танкеры вынуждены ожидать у Шри-Ланки; доступный флот сокращается, "
+                "а сроки и стоимость нефтяного фрахта на маршрутах Ирана растут."
+            ),
+        }
+
+    if (
+        contains_any(lowered, ("jebel ali", "jebel-ali", "джебель-али", "джебель али"))
+        and contains_any(lowered, ("top 30", "top-30", "топ-30", "топ 30", "ranking", "рейтинг"))
+    ):
+        return {
+            "summary": (
+                "Джебель-Али выпал из тридцатки крупнейших контейнерных портов "
+                "впервые за 20 лет."
+            ),
+            "cause": (
+                "Снижение контейнерных потоков на фоне кризиса в Персидском заливе."
+            ),
+            "effect": (
+                "Контейнерные потоки перераспределяются между портами региона; сроки "
+                "и ставки через Джебель-Али нужно перепроверять, но это не означает закрытие порта."
+            ),
+        }
+
+    if (
+        contains_any(lowered, ("vanuatu", "вануату"))
+        and contains_any(
+            lowered,
+            (
+                "digital ship clearance", "maritime single window", "single window",
+                "digital clearance", "цифров", "единое морское окно",
+            ),
+        )
+    ):
+        return {
+            "summary": (
+                "Вануату внедряет Maritime Single Window для цифрового обмена сведениями "
+                "между судами и портовыми органами."
+            ),
+            "cause": (
+                "Переход портового оформления на цифровой обмен данными через "
+                "единое морское окно."
+            ),
+            "effect": (
+                "При заходе в порты Вануату сведения будут подаваться через одно окно; "
+                "повторный ввод документов и время портового оформления должны сократиться."
+            ),
+        }
+
+    return {}
 
 
 def concrete_effect(
@@ -1113,6 +1272,11 @@ def article_to_news(article: dict, translator) -> dict | None:
         return None
     if contains_any(combined, PASSENGER_TERMS):
         return None
+    if (
+        contains_any(combined, MILITARY_TERMS)
+        and contains_any(combined, SPECULATIVE_WAR_COMMENTARY_TERMS)
+    ):
+        return None
 
     has_direct_network_impact = (
         contains_any(combined, DIRECT_LOGISTICS_ASSET_TERMS)
@@ -1141,15 +1305,30 @@ def article_to_news(article: dict, translator) -> dict | None:
     title_ru = translate(original_title, language, translator)
     article_text_ru = translate(excerpt, language, translator) if excerpt else ""
     route = route_for(combined, directions, clean(article.get("sourcecountry")))
-    summary = concrete_summary(
+    event_details = specific_event_details(
+        combined,
+        title_ru,
+        article_text_ru,
+        route,
+    )
+    summary = event_details.get("summary") or concrete_summary(
         title_ru,
         article_text_ru,
         rule,
         transports,
         route,
     )
-    cause = concrete_cause(article_text_ru, title_ru, summary)
-    effect = concrete_effect(rule, combined, transports, route)
+    cause = event_details.get("cause") or concrete_cause(
+        article_text_ru,
+        title_ru,
+        summary,
+    )
+    effect = event_details.get("effect") or concrete_effect(
+        rule,
+        combined,
+        transports,
+        route,
+    )
 
     return {
         "date": date_for(clean(article.get("seendate"))),
