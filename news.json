@@ -1,62 +1,134 @@
 {
-  "updatedAt": "2026-08-26T07:59:40.973684+00:00",
+  "updatedAt": "2026-08-27T06:04:37.241968+00:00",
   "periodHours": 24,
   "language": "ru",
   "analysisMethod": "rule-based",
   "sourceMix": {
-    "target": "50/50",
-    "russian": 1,
-    "foreign": 1
+    "target": "50/50 when available",
+    "russian": 0,
+    "foreign": 5
   },
-  "notice": "Лента содержит равное количество русскоязычных и иностранных источников. Новости получены из общего RSS-поиска Google News и дополнительных поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен локальной открытой моделью. Важность, причина и последствие — алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник.",
+  "notice": "Целевой баланс ленты — 50/50 русскоязычных и иностранных источников. Если в одной группе недостаточно значимых свежих публикаций, свободные места заполняются лучшими новостями из другой группы. Новости получены из общего RSS-поиска Google News и дополнительных поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен локальной открытой моделью. Важность, причина и последствие — алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник.",
   "news": [
     {
-      "date": "25.08.2026",
-      "importance": "Средняя",
-      "importanceScore": 94,
+      "date": "26.08.2026",
+      "importance": "Высокая",
+      "importanceScore": 100,
       "sourceLanguage": "Иностранный",
       "transports": [
         "Море"
       ],
       "directions": [
-        "Китай"
+        "Другие"
       ],
-      "title": "Мировая загруженность портов на новом максимуме, так как все больше тайфунов обрушилось на Китай",
-      "route": "Китай — международные грузовые направления",
-      "fact": "Мировая загруженность портов на новом максимуме, так как все больше тайфунов обрушилось на Китай",
-      "cause": "Перегрузка инфраструктуры и накопление необработанных грузов.",
-      "effect": "Вероятны ожидание свободного слота, простой транспорта и рост расходов на хранение и демередж.",
+      "title": "Экспорт нефти и зерна упал, поскольку Украина и Россия атакуют судоходство",
+      "route": "Международные грузовые маршруты",
+      "fact": "Экспорт нефти и зерна упал, поскольку Украина и Россия атакуют судоходство",
+      "cause": "Угроза безопасности, вооружённый инцидент или нападение на транспортную инфраструктуру.",
+      "effect": "Возможны остановка движения, перенаправление грузов, рост страховых надбавок, стоимости и сроков доставки.",
       "sources": [
         {
-          "name": "theloadstar.com",
-          "url": "https://news.google.com/rss/articles/CBMijwFBVV95cUxObWVQQ0I4RTVEZzNDS1VkcHFDZTBZTjF0VTEtRUVhQjRuWms0V2JXdkVVSkFVZm9OMDRfNVpsNjNkOERYZzhJNzhmcHBHNjFiZjFId0lYOVl0NDdFQkFYVl9NOE5xcXk2Q2J4M0pZUVNiRy1NMDBPWWc0Yl90M0tVV0NRODJiRHFWSnAzTm1FTQ?oc=5"
+          "name": "maritime-executive.com",
+          "url": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxOVnVfWnM1a20zRlpDRW1wUmJNRVNtdzcxUC1vcHJqaDFkYTZTXzY0eTM0alV4Z1NGenZESmFzMjZCZHFYZFBCOVl3U0hCZk5OQWtGdi16b2ZKdzdoSEVUQVh2QnpvTHhOR2FuY3VxNm1EUmNJTXNWVXZuMEEzS2VaX19PdzdXeEZqX25VR213NHFZU0lfSGpmV1lNa0s1aWl1elhvMXVOeTBMdw?oc=5"
         }
       ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 94/100"
+      "assessment": "Алгоритмическая значимость для грузовой логистики: 100/100"
     },
     {
-      "date": "25.08.2026",
-      "importance": "Средняя",
-      "importanceScore": 86,
-      "sourceLanguage": "Русскоязычный",
+      "date": "26.08.2026",
+      "importance": "Высокая",
+      "importanceScore": 100,
+      "sourceLanguage": "Иностранный",
       "transports": [
-        "Ж/д"
+        "Море"
       ],
       "directions": [
         "Другие"
       ],
-      "title": "Расширен перечень случаев для оформления бумажной железнодорожной накладной",
+      "title": "Война с Ираном приближается к патовой ситуации в украинском стиле, говорит начальник судоходства",
       "route": "Международные грузовые маршруты",
-      "fact": "Расширен перечень случаев для оформления бумажной железнодорожной накладной",
+      "fact": "Война с Ираном приближается к патовой ситуации в украинском стиле, говорит начальник судоходства",
+      "cause": "Угроза безопасности, вооружённый инцидент или нападение на транспортную инфраструктуру.",
+      "effect": "Возможны остановка движения, перенаправление грузов, рост страховых надбавок, стоимости и сроков доставки.",
+      "sources": [
+        {
+          "name": "ft.com",
+          "url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxNRzhMaEtReENkOU5fdjF0bkZ4aVdEZ0g3UXlDeFhmaGd4eEd4bjV5THRtWjUydUhQa3h3M2pDdWtpM0t1RWQzcjI5NFJsM3p3RU1XWDhYb0tuME41dWN4OE54NEljcEhzSENYTUsyMFVjNzFERzM2QzFzYmZjc2t1THotM28?oc=5"
+        }
+      ],
+      "assessment": "Алгоритмическая значимость для грузовой логистики: 100/100"
+    },
+    {
+      "date": "26.08.2026",
+      "importance": "Высокая",
+      "importanceScore": 98,
+      "sourceLanguage": "Иностранный",
+      "transports": [
+        "Море"
+      ],
+      "directions": [
+        "Другие"
+      ],
+      "title": "Кризис в Персидском заливе привел к тому, что Джебель Али покинул топ-30 портов после 20 лет работы",
+      "route": "Международные грузовые маршруты",
+      "fact": "Кризис в Персидском заливе привел к тому, что Джебель Али покинул топ-30 портов после 20 лет работы",
+      "cause": "Авария или повреждение транспорта либо инфраструктуры.",
+      "effect": "Возможны временная недоступность участка, задержки, дополнительная перегрузка и перенаправление грузов.",
+      "sources": [
+        {
+          "name": "theloadstar.com",
+          "url": "https://news.google.com/rss/articles/CBMiowFBVV95cUxPbnRFajk2S0tvOU1Lb25pZmJ6c0N1d29BdG5RZzQtREc4bnJaWUVRbmxhdVMzZ2doRXlJVXItcE12SnhBdF9JMktWdkJtb1lxT08zUmNYQVlFckc0VmZ6a3llMlkwR21LVVlHODVtWV96aDVxaVpfR0pwMGhlMlZSRUpCSlU0TlRnNklKTUNIOG5mdnNJLUk3QTVMMEtqeU05UXpz?oc=5"
+        }
+      ],
+      "assessment": "Алгоритмическая значимость для грузовой логистики: 98/100"
+    },
+    {
+      "date": "26.08.2026",
+      "importance": "Средняя",
+      "importanceScore": 88,
+      "sourceLanguage": "Иностранный",
+      "transports": [
+        "Море"
+      ],
+      "directions": [
+        "Другие"
+      ],
+      "title": "Вануату добился прогресса в очистке цифровых судов",
+      "route": "Международные грузовые маршруты",
+      "fact": "Вануату добился прогресса в очистке цифровых судов",
       "cause": "Изменение режима пограничного или таможенного контроля.",
       "effect": "Может вырасти время оформления; необходимо проверить документы, ограничения по грузу и доступность перехода.",
       "sources": [
         {
-          "name": "trans.ru",
-          "url": "https://news.google.com/rss/articles/CBMipwFBVV95cUxPdXlKYlg3Nk90WnhNWHd0eUtpWHQyN1NCUnc1cE9zVTUtTEZtekdlVXBrTmlqbm55NHNmNmQzU1Y1RWNFQ3MxMzhoemZ0MlYtbnF6RXdhSXc3a0hIOUtGZFVQTHBaT0ZFUjI1cnNycDhIVzlxWmc5WFVLMUNwcFA5VEZ2d1pQcG0zZVlKM1U5djhkRmhHSF9maEVUdGJVdHZEek81cVY1OA?oc=5"
+          "name": "imo.org",
+          "url": "https://news.google.com/rss/articles/CBMia0FVX3lxTE44V1pqbmVyeUVDUmFlZTZ6OVFLWnd6azNWVWM3SVRDbUZDdEhEa0hHbTFXa1dLZXU1SHpwWHZ0dm01b2I0XzVnaDdtMDc1Sldlb0lPd2dmOHpnaTJyempCNkJBSEhSQkFvMVFB?oc=5"
         }
       ],
-      "assessment": "Алгоритмическая значимость для грузовой логистики: 86/100"
+      "assessment": "Алгоритмическая значимость для грузовой логистики: 88/100"
+    },
+    {
+      "date": "26.08.2026",
+      "importance": "Средняя",
+      "importanceScore": 84,
+      "sourceLanguage": "Иностранный",
+      "transports": [
+        "Авто"
+      ],
+      "directions": [
+        "Другие"
+      ],
+      "title": "CBSA обнаружила 385 килограммов кокаина в грузовике на границе США и Канады",
+      "route": "Международные грузовые маршруты",
+      "fact": "CBSA обнаружила 385 килограммов кокаина в грузовике на границе США и Канады",
+      "cause": "Изменение режима пограничного или таможенного контроля.",
+      "effect": "Может вырасти время оформления; необходимо проверить документы, ограничения по грузу и доступность перехода.",
+      "sources": [
+        {
+          "name": "freightwaves.com",
+          "url": "https://news.google.com/rss/articles/CBMiqAFBVV95cUxQV1FHeHRTbm9EOGQ1amNYSEMtYWJMcm5jNWM1VlhWYm1Sb0Y2SW9mdzBSeDNfLUtQVnBQLV9meldJUFNUcnNQalB0QWlORmtSaS1aX0cycFR6RDdlbXpIWHU3UWh0STlkTlg5RzhQOENjVkNZSHpWNDBiQTNTTWpsNXA0X1dxVjlrX0YwbVFkbWNhekdjSXFxc0RFeGhFSmEta0ZMLXZzdzE?oc=5"
+        }
+      ],
+      "assessment": "Алгоритмическая значимость для грузовой логистики: 84/100"
     }
   ]
 }
