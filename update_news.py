@@ -952,20 +952,46 @@ def build_feed(articles: list[dict]) -> dict:
         unique_articles, "foreign", translator, accepted_titles
     )
 
-    # Strict 50/50: if one group has fewer than six suitable articles, publish
-    # the same smaller number from each group instead of distorting the ratio.
+    # Aim for 50/50 first. If one language group has too few suitable articles,
+    # fill the remaining slots with the strongest unused articles from either
+    # group instead of shrinking the whole feed to the smaller pool.
     pair_count = min(
         TARGET_PER_LANGUAGE,
         len(russian_pool),
         len(foreign_pool),
     )
+    news = russian_pool[:pair_count] + foreign_pool[:pair_count]
+
+    remaining_candidates = (
+        russian_pool[pair_count:]
+        + foreign_pool[pair_count:]
+    )
+    remaining_candidates.sort(
+        key=lambda item: item["importanceScore"],
+        reverse=True,
+    )
+    news.extend(
+        remaining_candidates[
+            : max(0, MAX_NEWS - len(news))
+        ]
+    )
+
+    selected_russian = sum(
+        1
+        for item in news
+        if item["sourceLanguage"] == "Русскоязычный"
+    )
+    selected_foreign = sum(
+        1
+        for item in news
+        if item["sourceLanguage"] == "Иностранный"
+    )
     print(
         "Filter summary: "
         f"fresh unique russian={raw_russian}, foreign={raw_foreign}; "
         f"relevant russian={len(russian_pool)}, foreign={len(foreign_pool)}; "
-        f"selected={pair_count}+{pair_count}"
+        f"selected russian={selected_russian}, foreign={selected_foreign}"
     )
-    news = russian_pool[:pair_count] + foreign_pool[:pair_count]
     news.sort(
         key=lambda item: (
             0 if item["importance"] == "Высокая" else 1,
@@ -979,12 +1005,14 @@ def build_feed(articles: list[dict]) -> dict:
         "language": "ru",
         "analysisMethod": "rule-based",
         "sourceMix": {
-            "target": "50/50",
-            "russian": pair_count,
-            "foreign": pair_count,
+            "target": "50/50 when available",
+            "russian": selected_russian,
+            "foreign": selected_foreign,
         },
         "notice": (
-            "Лента содержит равное количество русскоязычных и иностранных источников. "
+            "Целевой баланс ленты — 50/50 русскоязычных и иностранных источников. "
+            "Если в одной группе недостаточно значимых свежих публикаций, свободные "
+            "места заполняются лучшими новостями из другой группы. "
             "Новости получены из общего RSS-поиска Google News и дополнительных "
             "поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен "
             "локальной открытой моделью. Важность, причина и последствие — "
@@ -1001,7 +1029,7 @@ def empty_feed(notice: str) -> dict:
         "language": "ru",
         "analysisMethod": "rule-based",
         "sourceMix": {
-            "target": "50/50",
+            "target": "50/50 when available",
             "russian": 0,
             "foreign": 0,
         },
@@ -1057,8 +1085,8 @@ def main() -> int:
         for failure in failures:
             print(failure, file=sys.stderr)
         feed = empty_feed(
-            "За последние 24 часа не найдено сбалансированного набора "
-            "значимых русскоязычных и иностранных новостей. "
+            "За последние 24 часа не найдено значимых свежих новостей, "
+            "прошедших проверку на влияние на грузовую логистику. "
             "Старые новости не показываются."
         )
         write_feed(feed)
