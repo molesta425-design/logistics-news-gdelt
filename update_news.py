@@ -139,6 +139,22 @@ RSS_FEEDS = [
         ),
     },
     {
+        "label": "foreign-reuters-bloomberg",
+        "language": "English",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+        "sourceType": "wire",
+        "query": (
+            '(site:reuters.com OR site:bloomberg.com) '
+            '(freight OR cargo OR shipping OR container OR maritime OR port OR '
+            'railway OR trucking OR customs OR "supply chain") '
+            '(disruption OR suspend OR closure OR strike OR sanction OR tariff OR '
+            'surcharge OR delay OR reroute OR attack OR congestion OR drought OR '
+            'flood OR regulation) when:1d'
+        ),
+    },
+    {
         "label": "official-carriers-global-a",
         "language": "English",
         "hl": "en-US",
@@ -514,7 +530,9 @@ DIRECT_LOGISTICS_ASSET_TERMS = (
     "freight route", "shipping route", "trade route", "logistics corridor",
     "cargo terminal", "freight terminal", "port operations", "port traffic",
     "rail infrastructure", "rail freight", "freight train", "commercial vessel",
-    "merchant ship", "container ship", "border crossing", "cargo airport",
+    "merchant ship", "container ship", "container carrier", "container carriers",
+    "container line", "container lines", "shipping line", "shipping lines",
+    "cargo service", "cargo services", "border crossing", "cargo airport",
     "motorway", "highway", "major road",
     "грузовой маршрут", "судоходный маршрут", "торговый маршрут",
     "транспортный коридор", "грузовой терминал", "работа порта",
@@ -527,7 +545,8 @@ DIRECT_OPERATIONAL_IMPACT_TERMS = (
     "closed", "closure", "suspended", "halted", "stopped", "blocked", "shutdown",
     "disrupted", "damaged", "destroyed", "reroute", "rerouted", "diverted",
     "delay", "delays", "restriction", "restrictions", "outage", "attack on",
-    "strike on", "traffic stopped", "operations stopped",
+    "strike on", "traffic stopped", "operations stopped", "booking suspension",
+    "bookings suspended", "suspend bookings", "service suspension",
     "закрыт", "закрытие", "приостанов", "останов", "перекрыт",
     "заблокирован", "нарушена работа", "поврежд", "разруш", "перенаправ",
     "задерж", "огранич", "атакован", "удар по", "обстрел", "движение прекращено",
@@ -552,6 +571,7 @@ PRIORITY_REGION_TERMS = (
 
 TRUSTED_DOMAINS = {
     "reuters.com": 14,
+    "bloomberg.com": 14,
     "apnews.com": 12,
     "imo.org": 12,
     "iata.org": 12,
@@ -1272,6 +1292,10 @@ def candidate_score(article: dict) -> int:
         score += 24
     elif article.get("sourceType") == "profile":
         score += 8
+    elif article.get("sourceType") == "wire":
+        # Reuters and Bloomberg are valuable secondary confirmations, but an
+        # operator advisory still outranks a media rewrite of the same event.
+        score += 12
     elif article.get("sourceType") == "documents":
         score += 10
     if contains_any(title, COMMERCIAL_FREIGHT_TERMS):
@@ -1314,7 +1338,7 @@ CAUSE_MARKERS = (
     "после повреждения",
     "due to", "because", "amid", "caused by", "driven by",
     "as a result of", "following", "after an attack", "after the attack",
-    "after an accident", "after the closure", "after damage",
+    "after a", "after an accident", "after the closure", "after damage",
 )
 
 
@@ -1682,7 +1706,11 @@ def article_to_news(article: dict, translator) -> dict | None:
         return None
 
     has_commercial_context = contains_any(combined, COMMERCIAL_FREIGHT_TERMS)
-    is_profile_source = article.get("sourceType") in {"profile", "carrier"}
+    is_profile_source = article.get("sourceType") in {
+        "profile",
+        "carrier",
+        "wire",
+    }
     if not has_commercial_context and not (
         is_profile_source and rule is not None and transports
     ):
