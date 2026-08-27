@@ -2,8 +2,8 @@
 """Build a Russian logistics-news feed from free Google News RSS searches.
 
 The script deliberately uses no paid API. Translation is performed locally
-with Argos Translate. Cause and effect are rule-based assessments and are
-labelled as such in the output metadata.
+with Argos Translate. Summary and cause are extracted from the publication;
+the logistics consequence and importance are rule-based assessments.
 """
 
 from __future__ import annotations
@@ -871,16 +871,113 @@ def logistics_score(
     return max(0, min(100, score))
 
 
-def concrete_cause(title: str, fact: str) -> str:
-    """Use the article's specific event instead of a generic rule label."""
-    candidate = clean(title)
-    if len(candidate) < 20:
-        candidate = clean(fact)
-    candidate = re.split(r"(?<=[.!?])\s+", candidate, maxsplit=1)[0]
-    candidate = candidate[:280].rstrip(" ,;:-")
-    if candidate and candidate[-1] not in ".!?":
-        candidate += "."
-    return candidate
+CAUSE_MARKERS = (
+    "из-за", "в связи с", "на фоне", "поскольку", "так как",
+    "причиной", "в результате", "после того как",
+    "due to", "because", "amid", "caused by", "driven by",
+    "as a result of", "following",
+)
+
+
+def sentences_for(text: str) -> list[str]:
+    return [
+        clean(sentence)
+        for sentence in re.split(r"(?<=[.!?])\s+", clean(text))
+        if len(clean(sentence)) >= 25
+    ]
+
+
+def sentence_similarity(left: str, right: str) -> float:
+    return SequenceMatcher(
+        None,
+        normalize_title(left),
+        normalize_title(right),
+    ).ratio()
+
+
+def finish_sentence(text: str, limit: int = 320) -> str:
+    result = clean(text)[:limit].rstrip(" ,;:-")
+    if result:
+        result = result[0].upper() + result[1:]
+    if result and result[-1] not in ".!?":
+        result += "."
+    return result
+
+
+def is_causal_sentence(sentence: str) -> bool:
+    lowered = sentence.lower()
+    return any(has_term(lowered, marker) for marker in CAUSE_MARKERS)
+
+
+def summary_fallback(rule: Rule, transports: list[str], route: str) -> str:
+    scope = transport_scope(transports)
+    category = rule.cause.lower()
+    if "документ" in category:
+        action = "Меняется порядок оформления транспортных документов"
+    elif "санкцион" in category:
+        action = "Меняются ограничения для грузовых операций"
+    elif "тариф" in category or "рыночных ставок" in category:
+        action = "Меняется стоимость новых грузовых отправок"
+    elif "закрытие" in category:
+        action = "Ограничена доступность грузового маршрута или терминала"
+    elif "забастов" in category:
+        action = "Сокращается доступная пропускная способность"
+    elif "авария" in category:
+        action = "Нарушена работа транспортного участка или инфраструктуры"
+    elif "погод" in category:
+        action = "Погодные условия ограничивают движение или обработку грузов"
+    elif "пограничного" in category or "таможенного" in category:
+        action = "Меняется режим пограничного или таможенного оформления"
+    elif "перегрузка инфраструктуры" in category:
+        action = "На инфраструктуре накопилась очередь необработанных грузов"
+    elif "расписание" in category or "маршрут" in category:
+        action = "Перевозчик изменяет грузовой маршрут или расписание"
+    elif "безопасност" in category:
+        action = "Нарушена работа коммерческой грузовой инфраструктуры"
+    else:
+        action = "Возникло операционное ограничение грузового сообщения"
+    return f"{action} для {scope} по направлению «{route}»."
+
+
+def concrete_summary(
+    title: str,
+    article_text: str,
+    rule: Rule,
+    transports: list[str],
+    route: str,
+) -> str:
+    """Return the main fact without repeating the title or the cause."""
+    candidates = [
+        sentence
+        for sentence in sentences_for(article_text)
+        if sentence_similarity(sentence, title) < 0.76
+        and not is_causal_sentence(sentence)
+    ]
+    if candidates:
+        return finish_sentence(candidates[0])
+    return summary_fallback(rule, transports, route)
+
+
+def concrete_cause(article_text: str, title: str, summary: str) -> str:
+    """Extract a stated cause; never copy the title or invent a reason."""
+    for sentence in sentences_for(article_text):
+        lowered = sentence.lower()
+        marker_positions = [
+            (lowered.find(marker), marker)
+            for marker in CAUSE_MARKERS
+            if lowered.find(marker) >= 0
+        ]
+        if not marker_positions:
+            continue
+        position, _ = min(marker_positions, key=lambda item: item[0])
+        candidate = sentence[position:] if position > 0 else sentence
+        if (
+            sentence_similarity(candidate, title) >= 0.76
+            or sentence_similarity(candidate, summary) >= 0.82
+        ):
+            continue
+        return finish_sentence(candidate, limit=280)
+    return "Причина в публикации не указана."
 
 
 def transport_scope(transports: list[str]) -> str:
@@ -974,9 +1071,20 @@ def article_to_news(article: dict, translator) -> dict | None:
 
     url = clean(article.get("url"))
     domain = source_name(url, clean(article.get("domain")))
+
+    # Reject obvious noise before downloading the article body.
+    if contains_any(original_title, CRIME_AND_SEIZURE_TERMS):
+        return None
+    if contains_any(original_title, PASSENGER_TERMS):
+        return None
+
     excerpt = clean(article.get("excerpt"))
-    if len(excerpt) < 45:
-        excerpt = article_excerpt(url)
+    if (
+        len(excerpt) < 45
+        or sentence_similarity(excerpt, original_title) >= 0.82
+    ):
+        extracted = article_excerpt(url)
+        excerpt = extracted or ""
     combined = f"{original_title} {excerpt}"
 
     rule = rule_for(combined)
@@ -1014,10 +1122,16 @@ def article_to_news(article: dict, translator) -> dict | None:
         return None
 
     title_ru = translate(original_title, language, translator)
-    excerpt_ru = translate(excerpt, language, translator) if excerpt else ""
-    fact = (excerpt_ru if len(excerpt_ru) >= 45 else title_ru)[:700]
+    article_text_ru = translate(excerpt, language, translator) if excerpt else ""
     route = route_for(combined, directions, clean(article.get("sourcecountry")))
-    cause = concrete_cause(title_ru, fact)
+    summary = concrete_summary(
+        title_ru,
+        article_text_ru,
+        rule,
+        transports,
+        route,
+    )
+    cause = concrete_cause(article_text_ru, title_ru, summary)
     effect = concrete_effect(rule, combined, transports, route)
 
     return {
@@ -1034,8 +1148,10 @@ def article_to_news(article: dict, translator) -> dict | None:
         "directions": directions,
         "title": title_ru,
         "route": route,
-        "fact": fact,
+        "summary": summary,
+        "fact": summary,
         "cause": cause,
+        "consequence": effect,
         "effect": effect,
         "sources": [{"name": domain, "url": url}],
         "assessment": f"Алгоритмическая значимость для грузовой логистики: {score}/100",
@@ -1176,7 +1292,8 @@ def build_feed(articles: list[dict]) -> dict:
             "места заполняются лучшими новостями из другой группы. "
             "Новости получены из общего RSS-поиска Google News и дополнительных "
             "поисков по официальным и отраслевым логистическим сайтам. Перевод выполнен "
-            "локальной открытой моделью. Важность, причина и последствие — "
+            "локальной открытой моделью. Суть и причина извлекаются из публикации; "
+            "если причина не названа, это указывается прямо. Последствие и важность — "
             "алгоритмическая оценка; ключевые решения проверяйте по ссылке на источник."
         ),
         "news": news,
