@@ -12,13 +12,14 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from xml.etree import ElementTree
 
 import requests
@@ -26,6 +27,7 @@ import trafilatura
 
 
 OUTPUT_PATH = Path(__file__).with_name("news.json")
+COLLECTOR_VERSION = "2026-08-28-url-resolver-v2-safeguard"
 MAX_NEWS = 12
 TARGET_PER_LANGUAGE = MAX_NEWS // 2
 MAX_CANDIDATES_PER_LANGUAGE = 100
@@ -81,6 +83,25 @@ GENERAL_FREIGHT_RU = (
     '"пункт пропуска" OR авиагруз OR авиаперевозки'
 )
 
+# Google News otherwise matches logistics words buried anywhere in an article
+# and returns political, financial and passenger stories whose headline is not
+# about logistics.  These variants require the logistics subject in the title.
+GENERAL_FREIGHT_TITLE_EN = (
+    'intitle:freight OR intitle:cargo OR intitle:shipping OR intitle:maritime OR '
+    'intitle:container OR intitle:port OR intitle:vessel OR intitle:tanker OR '
+    'intitle:railway OR intitle:railroad OR intitle:trucking OR intitle:truck OR '
+    'intitle:customs OR intitle:"border crossing" OR intitle:"air cargo" OR '
+    'intitle:"air freight" OR intitle:"supply chain"'
+)
+
+GENERAL_FREIGHT_TITLE_RU = (
+    'intitle:груз OR intitle:грузоперевозки OR intitle:логистика OR '
+    'intitle:контейнер OR intitle:порт OR intitle:судно OR intitle:морские OR '
+    'intitle:железнодорож OR intitle:вагон OR intitle:грузовик OR '
+    'intitle:большегруз OR intitle:таможня OR intitle:"пункт пропуска" OR '
+    'intitle:авиагруз OR intitle:авиаперевозки'
+)
+
 CARRIER_UPDATE_TERMS_EN = (
     '"customer advisory" OR "customer advisories" OR "operational update" OR '
     '"operational updates" OR "operations update" OR "service update" OR '
@@ -106,10 +127,11 @@ RSS_FEEDS = [
         "ceid": "US:en",
         "sourceType": "general",
         "query": (
-            f'({GENERAL_FREIGHT_EN}) '
+            f'({GENERAL_FREIGHT_TITLE_EN}) '
             f'({RISK_TERMS_EN} OR Belarus OR Russia OR Turkey OR China OR '
             'rates OR index OR regulation OR mandatory OR required OR '
-            '"service change" OR "blank sailing") when:1d'
+            '"service change" OR "blank sailing" OR launch OR "new service" OR '
+            'reopen OR reopening OR drop OR drops OR fell OR falls OR slip OR slips) when:1d'
         ),
     },
     {
@@ -120,10 +142,11 @@ RSS_FEEDS = [
         "ceid": "RU:ru",
         "sourceType": "general",
         "query": (
-            f'({GENERAL_FREIGHT_RU}) '
+            f'({GENERAL_FREIGHT_TITLE_RU}) '
             f'({RISK_TERMS_RU} OR Беларусь OR Россия OR Турция OR Китай OR '
             'ставки OR индекс OR правила OR обязательный OR требования OR '
-            '"изменение сервиса" OR "отмена рейса") when:1d'
+            '"изменение сервиса" OR "отмена рейса" OR запуск OR "новый сервис" OR '
+            'возобновление OR снижение OR вырос OR рост) when:1d'
         ),
     },
     {
@@ -147,11 +170,7 @@ RSS_FEEDS = [
         "sourceType": "wire",
         "query": (
             '(site:reuters.com OR site:bloomberg.com) '
-            '(freight OR cargo OR shipping OR container OR maritime OR port OR '
-            'railway OR trucking OR customs OR "supply chain") '
-            '(disruption OR suspend OR closure OR strike OR sanction OR tariff OR '
-            'surcharge OR delay OR reroute OR attack OR congestion OR drought OR '
-            'flood OR regulation) when:1d'
+            f'({GENERAL_FREIGHT_TITLE_EN}) when:1d'
         ),
     },
     {
@@ -216,7 +235,7 @@ RSS_FEEDS = [
         "query": (
             '(site:imo.org OR site:iata.org OR site:iru.org OR site:fiata.org OR '
             'site:wcoomd.org OR site:ec.europa.eu) '
-            '(freight OR cargo OR shipping OR customs OR border OR transport) when:1d'
+            f'({GENERAL_FREIGHT_TITLE_EN}) when:1d'
         ),
     },
     {
@@ -295,6 +314,14 @@ RSS_FEEDS = [
 ]
 
 USER_AGENT = "logistics-news-rss/2.0 (+public GitHub Actions feed)"
+ARTICLE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+)
+ARTICLE_SESSION = requests.Session()
+ARTICLE_SESSION.headers.update({"User-Agent": ARTICLE_USER_AGENT})
+GOOGLE_NEWS_SESSION = requests.Session()
+RESOLVED_URL_CACHE: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -347,7 +374,7 @@ RULES = [
         86,
     ),
     Rule(
-        ("storm", "typhoon", "hurricane", "cyclone", "flood", "drought", "wildfire", "ice", "snow", "шторм", "тайфун", "ураган", "циклон", "наводнен", "засух", "лед", "снег"),
+        ("storm", "typhoon", "hurricane", "cyclone", "flood", "drought", "wildfire", "ice", "snow", "soil saturation", "storm season", "шторм", "тайфун", "ураган", "циклон", "наводнен", "засух", "лед", "снег", "распутиц", "размок"),
         "Неблагоприятные погодные условия.",
         "Возможны ограничения движения и обработки грузов, пропуск рейсов, очереди и увеличение транзитного времени.",
         "Высокая",
@@ -429,6 +456,14 @@ RULES = [
             "отмена рейса", "пропуск порта", "приостановка сервиса",
             "изменение сервиса", "изменение расписания", "изменение маршрута",
             "новый грузовой маршрут", "запуск грузового маршрута",
+            "new container service", "launches container service",
+            "launched container service", "starts container service",
+            "first container service", "first container voyage",
+            "inaugural container service", "new cargo service",
+            "новый контейнерный сервис", "запустил контейнерный сервис",
+            "запустила контейнерный сервис", "начал обслуживать новый контейнерный сервис",
+            "начала обслуживать новый контейнерный сервис",
+            "первый контейнерный рейс", "первый контейнеровоз",
         ),
         "Перевозчик или оператор изменяет расписание, сервис либо маршрут.",
         "Нужно проверить доступную ёмкость и новое расписание; возможны перенос отправки, изменение транзитного времени и стоимости.",
@@ -442,22 +477,86 @@ RULES = [
         "Средняя",
         60,
     ),
+    Rule(
+        (
+            "shipping traffic drops", "shipping traffic dropped",
+            "shipping traffic falls", "shipping traffic fell",
+            "shipping traffic slips", "vessel traffic drops",
+            "vessel traffic dropped", "maritime traffic drops",
+            "maritime traffic dropped", "transits drop", "transits dropped",
+            "traffic through the strait", "traffic via the strait",
+            "traffic through strait", "traffic via strait",
+            "снижение судоходного трафика", "судоходный трафик снизился",
+            "сократилось число судов", "сокращение проходов судов",
+        ),
+        "Сокращение фактического движения коммерческих судов по маршруту.",
+        "Снижается доступная пропускная способность; возможны ожидание, перенос отправок и рост ставок.",
+        "Высокая",
+        82,
+    ),
+    Rule(
+        (
+            "reopen", "reopening", "resume navigation", "resuming navigation",
+            "restore navigation", "restoring navigation", "normalize navigation",
+            "navigation resumes", "transit resumes", "shipping resumes",
+            "возобновление судоходства", "возобновить судоходство",
+            "восстановление судоходства", "восстановить движение судов",
+            "открыть пролив", "открытие пролива", "возобновить транзит",
+        ),
+        "Переговоры или решение властей о восстановлении движения по ранее ограниченному маршруту.",
+        "Доступность маршрута может улучшиться, но расписания, ограничения и страховые условия нужно перепроверять.",
+        "Высокая",
+        82,
+    ),
+    Rule(
+        (
+            "bankruptcy", "bankruptcies", "insolvency", "court protection",
+            "chapter 7", "chapter 11", "банкрот", "несостоятельн",
+        ),
+        "Финансовая несостоятельность перевозчиков или логистических компаний.",
+        "Часть мощностей и услуг может уйти с рынка; требуется проверить устойчивость подрядчиков и доступную ёмкость.",
+        "Средняя",
+        74,
+    ),
+    Rule(
+        (
+            "regulation", "regulations", "new rules", "rule change",
+            "puts into law", "signed into law", "mandates", "requirement",
+            "fmCSA", "cdl rules", "hours of service", "electronic documents",
+            "новые правила", "изменил правила", "изменило правила",
+            "вступает в силу", "электронн документооборот", "эдо",
+        ),
+        "Вступают в силу новые обязательные правила для перевозок или оформления грузов.",
+        "Перевозчикам и грузовладельцам нужно обновить процессы и документы; неподготовленные отправки могут задерживаться.",
+        "Высокая",
+        82,
+    ),
 ]
 
 TRANSPORT_TERMS = {
-    "Авто": ("truck", "trucking", "lorry", "road freight", "highway", "border crossing", "e-cmr", "road consignment note", "грузовик", "грузовой автомобил", "грузовые автомобил", "грузовых автомобил", "грузовой транспорт", "автоперевоз", "фур", "автомобильн", "транспортная накладная", "транспортн накладн", "е-cmr"),
+    "Авто": (
+        "truck", "trucks", "trucking", "lorry", "lorries", "hgv",
+        "heavy goods vehicle", "heavy goods vehicles", "road freight",
+        "road transport", "highway", "border crossing", "fmCSA", "cdl",
+        "hours of service", "e-cmr",
+        "road consignment note", "грузовик", "грузовой автомобил",
+        "грузовые автомобил", "грузовых автомобил", "грузовой транспорт",
+        "автоперевоз", "большегруз", "фур", "автомобильн", "транспортная накладная",
+        "транспортн накладн", "е-cmr",
+    ),
     "Ж/д": ("rail", "railway", "railroad", "train", "wagon", "derail", "rail consignment note", "smgs", "cim", "железнодорож", "поезд", "вагон", "ржд", "железнодорожная накладная", "смгс", "цим"),
     "Море": (
         "port", "ship", "shipping", "vessel", "maritime", "tanker",
         "container ship", "container carrier", "container line", "shipping line",
+        "container service", "cargo service", "ocean freight", "ocean transportation",
         "canal", "strait", "sea ", "bill of lading", "ebl",
         "msc", "maersk", "cma cgm", "cma-cgm", "hapag-lloyd", "hapag lloyd",
         "cosco", "oocl", "ocean network express", "one line", "evergreen marine",
         "hmm", "yang ming", "zim", "wan hai", "pil", "fesco", "феско",
         "arkas", "turkon", "akkon", "sitc",
-        "порт", "судн", "морск", "танкер", "контейнеровоз",
+        "порт", "судн", "морск", "танкер", "контейнеровоз", "контейнерн",
         "контейнерн перевозчик", "контейнерн лини", "судоходн компани",
-        "морск лини", "канал", "пролив", "коносамент",
+        "контейнерн сервис", "грузов сервис", "морск лини", "канал", "пролив", "коносамент",
     ),
     "Авиа": ("air cargo", "air freight", "airport", "airline", "flight", "air waybill", "e-awb", "авиагруз", "авиаперевоз", "аэропорт", "авиакомпан", "авиарейс", "авианакладн"),
 }
@@ -465,7 +564,7 @@ TRANSPORT_TERMS = {
 GENERIC_DOCUMENT_TERMS = (
     "transport document", "electronic transport document", "transport permit",
     "customs declaration", "transit declaration", "cargo manifest",
-    "транспортн документ", "перевозочн документ", "транспортн накладн", "эпд",
+    "транспортн документ", "перевозочн", "транспортн накладн", "эпд",
     "таможенн деклараци", "транзитн деклараци", "грузов манифест",
     "разрешени на перевоз",
 )
@@ -480,7 +579,7 @@ COMMERCIAL_FREIGHT_TERMS = (
     "air cargo", "air freight", "warehouse", "port operations",
     "груз", "контейнер", "торговое судно", "судоход", "танкер", "терминал",
     "грузоперевоз", "вагон", "товар", "отправк", "авиагруз", "склад",
-    "портов", "перевозк", "transport document", "consignment note",
+    "портов", "перевозк", "перевозочн", "большегруз", "transport document", "consignment note",
     "bill of lading", "air waybill", "e-cmr", "e-awb", "smgs",
     "транспортн документ", "перевозочн документ", "транспортн накладн", "накладн", "эпд",
     "коносамент", "авианакладн", "смгс", "транзитн деклараци",
@@ -533,12 +632,16 @@ DIRECT_LOGISTICS_ASSET_TERMS = (
     "merchant ship", "container ship", "container carrier", "container carriers",
     "container line", "container lines", "shipping line", "shipping lines",
     "cargo service", "cargo services", "border crossing", "cargo airport",
-    "motorway", "highway", "major road",
+    "motorway", "highway", "major road", "strait", "canal", "sea lane",
+    "shipping traffic", "vessel traffic", "maritime traffic", "navigation",
+    "shipping chokepoint", "maritime chokepoint",
     "грузовой маршрут", "судоходный маршрут", "торговый маршрут",
     "транспортный коридор", "грузовой терминал", "работа порта",
     "движение судов", "железнодорожная инфраструктура", "грузовой поезд",
     "торговое судно", "контейнеровоз", "пункт пропуска", "грузовой аэропорт",
     "автомагистраль", "федеральная дорога", "трасса", "грузоперевозки",
+    "пролив", "канал", "морской путь", "судоходный трафик",
+    "движение коммерческих судов", "судоходство", "морская навигация",
 )
 
 DIRECT_OPERATIONAL_IMPACT_TERMS = (
@@ -547,9 +650,14 @@ DIRECT_OPERATIONAL_IMPACT_TERMS = (
     "delay", "delays", "restriction", "restrictions", "outage", "attack on",
     "strike on", "traffic stopped", "operations stopped", "booking suspension",
     "bookings suspended", "suspend bookings", "service suspension",
+    "traffic drops", "traffic dropped", "traffic falls", "traffic fell",
+    "traffic slips", "transits drop", "transits dropped", "reopen", "reopening",
+    "resume navigation", "restore navigation", "normalize navigation",
     "закрыт", "закрытие", "приостанов", "останов", "перекрыт",
     "заблокирован", "нарушена работа", "поврежд", "разруш", "перенаправ",
     "задерж", "огранич", "атакован", "удар по", "обстрел", "движение прекращено",
+    "трафик снизился", "снижение трафика", "сократилось число судов",
+    "возобновить судоходство", "возобновление судоходства", "восстановить движение",
 )
 
 NO_OPERATIONAL_IMPACT_TERMS = (
@@ -566,7 +674,7 @@ COMMENTARY_TERMS = (
 
 PRIORITY_REGION_TERMS = (
     "belarus", "russia", "turkey", "türkiye", "china",
-    "беларус", "росси", "турц", "китай",
+    "беларус", "росси", "турц", "кита",
 )
 
 TRUSTED_DOMAINS = {
@@ -645,6 +753,7 @@ REGIONS = [
 # continent.  These labels are checked before the generic regional list.
 SPECIFIC_ROUTES = [
     (("novorossiysk", "новороссийск"), "порт Новороссийск — Чёрное море"),
+    (("frankfurt airport", "аэропорт франкфурт"), "аэропорт Франкфурт — международные авиагрузовые направления"),
     (("rhine", "рейн"), "Рейн — Германия — порты ARA"),
     (("danube", "дунай"), "Дунай — Центральная и Юго-Восточная Европа"),
     (("jebel ali", "jebel-ali", "джебель-али", "джебель али"), "порт Джебель-Али — Персидский залив"),
@@ -657,15 +766,23 @@ SPECIFIC_ROUTES = [
 
 EVENT_GEOGRAPHY_TERMS = (
     ("Беларусь", ("belarus", "belarusian", "беларус", "минск", "брест")),
-    ("Россия", ("russia", "russian", "росси", "москва", "ржд")),
+    (
+        "Россия",
+        (
+            "russia", "russian", "росси", "москва", "ржд",
+            "novorossiysk", "новороссийск", "saint petersburg",
+            "st. petersburg", "санкт-петербург", "петербург", "vladivostok",
+            "владивосток", "подмосков", "коми",
+        ),
+    ),
     ("Турция", ("turkey", "turkish", "türkiye", "турц", "стамбул")),
-    ("Китай", ("china", "chinese", "китай", "пекин", "шанхай")),
+    ("Китай", ("china", "chinese", "кита", "пекин", "шанхай")),
     (
         "Германия",
         (
             "germany", "german", "deutschland", "deutsche", "герман",
             "vda", "bundesbank", "bmv", "rhine", "рейн", "дуйсбург",
-            "кёльн", "кауб",
+            "кёльн", "кауб", "frankfurt", "франкфурт",
         ),
     ),
     ("Австрия", ("austria", "austrian", "австри", "vienna", "вена")),
@@ -721,6 +838,18 @@ def has_term(lowered_text: str, term: str) -> bool:
     if normalized == "ес":
         # The EU abbreviation must not match inside words such as «перенести».
         return re.search(r"(?<![а-яё])ес(?![а-яё])", lowered_text) is not None
+    if normalized in {"ржд", "бжд", "смгс", "цим", "эпд", "эдо"}:
+        # Abbreviations must not match inside words such as «подтверждаться».
+        return re.search(
+            rf"(?<![а-яё]){re.escape(normalized)}(?![а-яё])",
+            lowered_text,
+        ) is not None
+    if normalized == "инди":
+        # Match India and Indian, but not «индивидуальный».
+        return re.search(
+            r"(?<![а-яё])инди(?:я|и|ю|ей|е|йск[а-яё]*)(?![а-яё])",
+            lowered_text,
+        ) is not None
     if re.fullmatch(r"[a-z0-9 -]+", normalized):
         pattern = r"(?<![a-z0-9])" + re.escape(normalized) + r"(?![a-z0-9])"
         return re.search(pattern, lowered_text) is not None
@@ -735,6 +864,12 @@ def has_term(lowered_text: str, term: str) -> bool:
         # appear in an ordinary road accident unrelated to freight logistics.
         return re.search(
             r"(?<![а-яё])груз(?:а|ы|ов|ом|ами|ах|овой|овая|овое|овые|ового|овую|овым|овыми)?(?![а-яё])",
+            lowered_text,
+        ) is not None
+    if normalized == "фур":
+        # The truck term «фура» must not match inside «Франкфурт».
+        return re.search(
+            r"(?<![а-яё])фур(?:а|ы|е|у|ой|ою|ами|ах)?(?![а-яё])",
             lowered_text,
         ) is not None
     return normalized in lowered_text
@@ -881,32 +1016,139 @@ def translate(text: str, language: str, translator) -> str:
         return text
 
 
-def article_excerpt(url: str) -> str:
+def resolve_google_news_url(url: str) -> str:
+    """Resolve a Google News RSS redirect to the publisher article URL.
+
+    Current Google News links use a signed token and cannot be decoded from
+    Base64 alone.  Resolving the publisher URL lets the relevance and cause
+    checks inspect the article instead of only its headline.
+    """
+    url = clean(url)
+    if url in RESOLVED_URL_CACHE:
+        return RESOLVED_URL_CACHE[url]
+
+    parsed = urlparse(url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if parsed.netloc != "news.google.com" or len(parts) < 2:
+        RESOLVED_URL_CACHE[url] = url
+        return url
+
+    token = parts[-1]
+    if parts[-2] not in {"articles", "read"} or not token:
+        RESOLVED_URL_CACHE[url] = url
+        return url
+
+    signature = ""
+    timestamp = ""
+    for prefix in (
+        "https://news.google.com/articles/",
+        "https://news.google.com/rss/articles/",
+    ):
+        try:
+            response = GOOGLE_NEWS_SESSION.get(prefix + token, timeout=20)
+            response.raise_for_status()
+            signature_match = re.search(
+                r'data-n-a-sg=["\']([^"\']+)',
+                response.text,
+            )
+            timestamp_match = re.search(
+                r'data-n-a-ts=["\']([^"\']+)',
+                response.text,
+            )
+            if signature_match and timestamp_match:
+                signature = signature_match.group(1)
+                timestamp = timestamp_match.group(1)
+                break
+        except Exception:
+            continue
+
+    if not signature or not timestamp:
+        RESOLVED_URL_CACHE[url] = url
+        return url
+
+    payload = [
+        "Fbv4je",
+        (
+            '["garturlreq",[["X","X",["X","X"],null,null,1,1,'
+            '"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,'
+            f'[1,1,1],1,1,null,0,0,null,0],"{token}",{timestamp},'
+            f'"{signature}"]'
+        ),
+    ]
     try:
-        downloaded = trafilatura.fetch_url(url)
-        if not downloaded:
-            return ""
+        response = GOOGLE_NEWS_SESSION.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "User-Agent": ARTICLE_USER_AGENT,
+            },
+            data=f"f.req={quote(json.dumps([[payload]]))}",
+            timeout=20,
+        )
+        response.raise_for_status()
+        chunks = response.text.split("\n\n")
+        parsed_data = json.loads(chunks[1])[:-2]
+        decoded_url = clean(json.loads(parsed_data[0][2])[1])
+        if decoded_url.startswith("http"):
+            RESOLVED_URL_CACHE[url] = decoded_url
+            return decoded_url
+    except Exception as error:
+        print(f"Google News URL warning: {error}", file=sys.stderr)
+
+    RESOLVED_URL_CACHE[url] = url
+    return url
+
+
+def article_excerpt(url: str, title: str = "") -> str:
+    try:
+        response = ARTICLE_SESSION.get(url, timeout=30)
+        response.raise_for_status()
         text = trafilatura.extract(
-            downloaded,
+            response.text,
             include_comments=False,
             include_tables=False,
             favor_precision=True,
         )
-        text = clean(text)
-        if not text:
+        if not clean(text):
             return ""
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        selected: list[str] = []
-        total = 0
-        for sentence in sentences:
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", text)
+        title_tokens = {
+            token[:6]
+            for token in normalize_title(title).split()
+            if len(token) >= 4
+        }
+        ranked: list[tuple[int, int, str]] = []
+        for index, sentence in enumerate(sentences):
             sentence = clean(sentence)
             if len(sentence) < 35:
                 continue
-            selected.append(sentence)
-            total += len(sentence)
-            if total >= 850 or len(selected) == 4:
-                break
-        return " ".join(selected)[:1200]
+            sentence_tokens = {
+                token[:6]
+                for token in normalize_title(sentence).split()
+                if len(token) >= 4
+            }
+            overlap = len(title_tokens & sentence_tokens)
+            causal = is_causal_sentence(sentence)
+            if overlap == 0 and not causal:
+                continue
+            score = overlap * 5
+            if causal:
+                score += 7
+            if contains_any(sentence, COMMERCIAL_FREIGHT_TERMS):
+                score += 3
+            if transports_for(sentence):
+                score += 2
+            if rule_for(sentence):
+                score += 2
+            ranked.append((score, index, sentence))
+
+        if not ranked:
+            fallback = [clean(item) for item in sentences if len(clean(item)) >= 35]
+            return " ".join(fallback[:4])[:1400]
+
+        best = sorted(ranked, key=lambda item: (-item[0], item[1]))[:8]
+        best.sort(key=lambda item: item[1])
+        return " ".join(item[2] for item in best)[:2200]
     except Exception as error:
         print(f"Article extraction warning for {url}: {error}", file=sys.stderr)
         return ""
@@ -1145,7 +1387,7 @@ def directions_for(text: str) -> list[str]:
     belarus = any(has_term(lowered, term) for term in ("belarus", "belarusian", "беларус", "минск"))
     russia = any(has_term(lowered, term) for term in ("russia", "russian", "росси", "москва"))
     turkey = any(has_term(lowered, term) for term in ("turkey", "turkish", "türkiye", "турц", "стамбул"))
-    china = any(has_term(lowered, term) for term in ("china", "chinese", "китай", "пекин", "шанхай"))
+    china = any(has_term(lowered, term) for term in ("china", "chinese", "кита", "пекин", "шанхай"))
 
     result: list[str] = []
     if belarus and russia:
@@ -1335,13 +1577,15 @@ def logistics_score(
 
 
 CAUSE_MARKERS = (
-    "из-за", "в связи с", "на фоне", "поскольку", "так как",
+    "из-за", "в связи с", "на фоне", "вследствие", "по причине",
+    "поскольку", "так как", "вызван", "вызвана", "вызвано",
     "причиной", "в результате", "после того как",
     "после атаки", "после аварии", "после закрытия", "после введения",
     "после повреждения",
-    "due to", "because", "amid", "caused by", "driven by",
-    "as a result of", "following", "after an attack", "after the attack",
-    "after a", "after an accident", "after the closure", "after damage",
+    "due to", "because of", "because", "amid", "caused by", "driven by",
+    "triggered by", "prompted by", "stemming from", "as a result of",
+    "following", "follows", "after an attack", "after the attack",
+    "after an accident", "after the closure", "after damage",
 )
 
 
@@ -1485,6 +1729,10 @@ def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
                 ("Wan Hai", ("wan hai", "wanhai")),
                 ("PIL", ("pil", "pacific international lines")),
                 ("FESCO", ("fesco", "феско")),
+                ("Arkas", ("arkas", "arkas line")),
+                ("Turkon", ("turkon", "turkon line")),
+                ("Akkon", ("akkon", "akkon lines")),
+                ("SITC", ("sitc", "sitc international")),
                 ("РЖД", ("rzd", "ржд")),
                 ("БЖД", ("belarusian railway", "бжд", "белорусская железная дорога")),
             )
@@ -1499,10 +1747,30 @@ def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
         and route != "Международные грузовые маршруты"
         and not route.startswith("Регион источника:")
     )
+    where = f" на направлении «{route}»" if specific_route else ""
+
+    # These causes are concrete without a named operator or route: the article
+    # itself states the legal or financial trigger.
+    if contains_any(lowered, ("bankruptcy", "bankruptcies", "insolvency", "банкрот", "несостоятельн")):
+        if contains_any(lowered, ("debt", "liabilities", "thin asset", "долг", "обязательств", "нехватк актив")):
+            return finish_sentence(
+                f"Высокая долговая нагрузка и нехватка активов привели логистические компании к банкротству{where}"
+            )
+    if contains_any(
+        lowered,
+        (
+            "new rules", "rule change", "regulation", "puts into law",
+            "signed into law", "mandates", "requirement", "hours of service",
+            "новые правила", "изменил правила", "изменило правила",
+            "вступает в силу", "электронн документооборот", "эдо",
+        ),
+    ):
+        return finish_sentence(
+            f"Введение новых обязательных правил изменило порядок перевозки или оформления грузов{where}"
+        )
+
     if not operator and not specific_route:
         return UNKNOWN_CAUSE
-
-    where = f" на направлении «{route}»" if specific_route else ""
 
     if contains_any(
         lowered,
@@ -1511,7 +1779,7 @@ def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
         return finish_sentence(f"Засуха и снижение уровня воды ограничили перевозки{where}")
     if contains_any(
         lowered,
-        ("storm", "typhoon", "hurricane", "cyclone", "flood", "шторм", "тайфун", "ураган", "циклон", "наводнен"),
+        ("storm", "typhoon", "hurricane", "cyclone", "flood", "soil saturation", "шторм", "тайфун", "ураган", "циклон", "наводнен", "распутиц", "размок"),
     ):
         return finish_sentence(f"Неблагоприятные погодные условия нарушили грузовые операции{where}")
     if contains_any(
@@ -1519,6 +1787,17 @@ def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
         ("attack", "drone", "missile", "атак", "бпла", "беспилот", "дрон", "ракет"),
     ):
         return finish_sentence(f"Атака затронула коммерческий транспортный объект{where}")
+    if contains_any(
+        lowered,
+        (
+            "war", "armed conflict", "hostilities", "blockade", "sea mine",
+            "naval mine", "войн", "вооруженн конфликт", "боевые действия",
+            "блокад", "морск мин",
+        ),
+    ):
+        return finish_sentence(
+            f"Военные действия и связанные с ними ограничения нарушили коммерческое судоходство{where}"
+        )
     if contains_any(lowered, ("strike", "walkout", "забастов", "стачк")):
         return finish_sentence(f"Забастовка работников сократила работу транспортной инфраструктуры{where}")
     if contains_any(lowered, ("sanction", "export ban", "import ban", "санкц", "запрет экспорт", "запрет импорт")):
@@ -1533,6 +1812,25 @@ def event_cause_from_evidence(rule: Rule, text: str, route: str) -> str:
         return finish_sentence(f"Изменение режима таможенного или пограничного контроля повлияло на оформление{where}")
     if contains_any(lowered, ("tariff", "surcharge", "freight rate", "тариф", "надбавк", "ставк фрахт")):
         return finish_sentence(f"Изменение тарифа, ставки или надбавки увеличило стоимость новых отправок{where}")
+    if contains_any(
+        lowered,
+        (
+            "new container service", "launches container service",
+            "launched container service", "starts container service",
+            "first container service", "first container voyage",
+            "inaugural container service", "new cargo service",
+            "новый контейнерный сервис", "запустил контейнерный сервис",
+            "запустила контейнерный сервис", "начал обслуживать новый контейнерный сервис",
+            "начала обслуживать новый контейнерный сервис",
+            "первый контейнерный рейс", "первый контейнеровоз",
+        ),
+    ):
+        action = (
+            f"Решение {operator} открыть новый грузовой сервис"
+            if operator
+            else "Решение перевозчика или терминала открыть новый грузовой сервис"
+        )
+        return finish_sentence(f"{action} создало новое сообщение{where}")
     if contains_any(lowered, ("closed", "closure", "suspend", "suspended", "shutdown", "закрыт", "приостанов", "перекрыт")):
         action = (
             f"Решение {operator} приостановить сервис"
@@ -1581,6 +1879,7 @@ def specific_event_details(
     if (
         has_term(lowered, "msc")
         and contains_any(lowered, ("novorossiysk", "новороссийск"))
+        and contains_any(lowered, ("ulsan iii", "ulsan 3", "ульсан iii", "ульсан 3"))
         and contains_any(
             lowered,
             (
@@ -1744,48 +2043,68 @@ def concrete_effect(
     )
 
 
+def reject_article(article: dict, reason: str) -> None:
+    article["_rejectReason"] = reason
+    return None
+
+
 def article_to_news(article: dict, translator) -> dict | None:
     original_title = clean(article.get("title"))
     language = clean(article.get("language"))
     group = language_group(language)
     if not group:
-        return None
+        return reject_article(article, "unsupported-language")
 
     url = clean(article.get("url"))
     domain = source_name(url, clean(article.get("domain")))
+    source_type = clean(article.get("sourceType"))
 
     # Reject obvious noise before downloading the article body.
     if contains_any(original_title, CRIME_AND_SEIZURE_TERMS):
-        return None
+        return reject_article(article, "crime-or-seizure")
     if contains_any(original_title, PASSENGER_TERMS):
-        return None
+        return reject_article(article, "passenger")
 
     excerpt = clean(article.get("excerpt"))
     if (
         len(excerpt) < 45
         or sentence_similarity(excerpt, original_title) >= 0.82
     ):
-        extracted = article_excerpt(url)
+        title_has_logistics = bool(
+            transports_for(original_title)
+            or contains_any(original_title, COMMERCIAL_FREIGHT_TERMS)
+            or contains_any(original_title, GENERIC_DOCUMENT_TERMS)
+            or source_type == "carrier"
+        )
+        resolved_url = resolve_google_news_url(url) if title_has_logistics else url
+        if resolved_url != url:
+            url = resolved_url
+            article["url"] = resolved_url
+        extracted = (
+            article_excerpt(url, original_title)
+            if title_has_logistics and urlparse(url).netloc != "news.google.com"
+            else ""
+        )
         excerpt = extracted or ""
     combined = f"{original_title} {excerpt}"
 
     rule = rule_for(combined)
     transports = transports_for(combined)
-    is_carrier_source = article.get("sourceType") == "carrier"
+    is_carrier_source = source_type == "carrier"
     if is_carrier_source and not transports:
         transports = ["Море"]
 
     # Crime, drugs, baggage and tourism are outside the business-news feed even
     # when they mention a container, customs office, port or airport.
     if contains_any(combined, CRIME_AND_SEIZURE_TERMS):
-        return None
+        return reject_article(article, "crime-or-seizure")
     if contains_any(combined, PASSENGER_TERMS):
-        return None
+        return reject_article(article, "passenger")
     if (
         contains_any(combined, MILITARY_TERMS)
         and contains_any(combined, SPECULATIVE_WAR_COMMENTARY_TERMS)
     ):
-        return None
+        return reject_article(article, "speculative-war-commentary")
 
     has_direct_network_impact = (
         contains_any(combined, DIRECT_LOGISTICS_ASSET_TERMS)
@@ -1793,13 +2112,13 @@ def article_to_news(article: dict, translator) -> dict | None:
         and not contains_any(combined, NO_OPERATIONAL_IMPACT_TERMS)
     )
     if contains_any(combined, PERSONAL_INCIDENT_TERMS) and not has_direct_network_impact:
-        return None
+        return reject_article(article, "personal-incident")
     if (
         contains_any(combined, MILITARY_TERMS)
         and not has_direct_network_impact
         and not is_carrier_source
     ):
-        return None
+        return reject_article(article, "military-without-direct-logistics-impact")
 
     has_commercial_context = contains_any(combined, COMMERCIAL_FREIGHT_TERMS)
     is_profile_source = article.get("sourceType") in {
@@ -1810,14 +2129,16 @@ def article_to_news(article: dict, translator) -> dict | None:
     if not has_commercial_context and not (
         is_profile_source and rule is not None and transports
     ):
-        return None
-    if not rule or not transports:
-        return None
+        return reject_article(article, "no-commercial-freight-context")
+    if not rule:
+        return reject_article(article, "no-operational-event")
+    if not transports:
+        return reject_article(article, "no-transport-mode")
 
     directions = directions_for(combined)
     score = logistics_score(combined, rule, transports, directions, domain)
     if score < MIN_LOGISTICS_SCORE:
-        return None
+        return reject_article(article, "score-below-threshold")
 
     title_ru = translate(original_title, language, translator)
     article_text_ru = translate(excerpt, language, translator) if excerpt else ""
@@ -1843,7 +2164,7 @@ def article_to_news(article: dict, translator) -> dict | None:
         route,
     )
     cause = event_details.get("cause") or concrete_cause(
-        article_text_ru,
+        "",
         title_ru,
         summary,
     )
@@ -1853,10 +2174,16 @@ def article_to_news(article: dict, translator) -> dict | None:
             f"{combined} {title_ru} {article_text_ru}",
             route,
         )
+    if cause == UNKNOWN_CAUSE:
+        cause = concrete_cause(
+            article_text_ru,
+            "",
+            summary,
+        )
     # A generic "cause not stated" card is not actionable.  The fallback
     # above still requires a named event plus an operator or concrete route.
     if cause == UNKNOWN_CAUSE:
-        return None
+        return reject_article(article, "no-concrete-cause")
     effect = event_details.get("effect") or concrete_effect(
         rule,
         combined,
@@ -1905,21 +2232,25 @@ def build_language_pool(
 
     pool: list[dict] = []
     per_domain: dict[str, int] = {}
+    rejection_counts: Counter[str] = Counter()
     for article in candidates[:MAX_CANDIDATES_PER_LANGUAGE]:
         if len(pool) >= MAX_NEWS:
             break
 
         original_title = clean(article.get("title"))
         if is_duplicate(original_title, accepted_titles):
+            rejection_counts["duplicate-event"] += 1
             continue
 
         url = clean(article.get("url"))
         domain = source_name(url, clean(article.get("domain")))
         if per_domain.get(domain, 0) >= 2:
+            rejection_counts["domain-limit"] += 1
             continue
 
         item = article_to_news(article, translator)
         if not item:
+            rejection_counts[clean(article.get("_rejectReason")) or "other"] += 1
             continue
 
         pool.append(item)
@@ -1927,6 +2258,12 @@ def build_language_pool(
         per_domain[domain] = per_domain.get(domain, 0) + 1
 
     pool.sort(key=lambda item: item["importanceScore"], reverse=True)
+    if rejection_counts:
+        details = ", ".join(
+            f"{reason}={count}"
+            for reason, count in rejection_counts.most_common()
+        )
+        print(f"Rejected {group}: {details}")
     return pool
 
 
@@ -2059,6 +2396,7 @@ def write_feed(feed: dict) -> None:
 
 
 def main() -> int:
+    print(f"Collector version: {COLLECTOR_VERSION}")
     session = requests.Session()
     session.headers.update(
         {
@@ -2082,27 +2420,21 @@ def main() -> int:
     if not articles:
         for failure in failures:
             print(failure, file=sys.stderr)
-        write_feed(
-            empty_feed(
-                "За последние 24 часа свежие публикации не получены. "
-                "Старые новости не показываются."
-            )
+        print(
+            "ERROR: RSS returned no articles; existing news.json was preserved.",
+            file=sys.stderr,
         )
-        print("Saved an empty fresh feed; stale news was removed.")
-        return 0
+        return 1
 
     feed = build_feed(articles)
     if not feed["news"]:
         for failure in failures:
             print(failure, file=sys.stderr)
-        feed = empty_feed(
-            "За последние 24 часа не найдено значимых свежих новостей, "
-            "прошедших проверку на влияние на грузовую логистику. "
-            "Старые новости не показываются."
+        print(
+            "ERROR: all articles were rejected; existing news.json was preserved.",
+            file=sys.stderr,
         )
-        write_feed(feed)
-        print("Saved an empty fresh feed; stale news was removed.")
-        return 0
+        return 1
 
     write_feed(feed)
     print(f"Saved {len(feed['news'])} news items to {OUTPUT_PATH}")
