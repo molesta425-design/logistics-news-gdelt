@@ -321,12 +321,15 @@ def load_baseline_namespace() -> dict:
                     "Pinned baseline update_news.py has unexpected contents"
                 )
 
-            namespace = {
-                "__name__": "logistics_news_baseline",
-                "__file__": str(Path(__file__)),
-            }
-            exec(compile(source, BASELINE_URL, "exec"), namespace)
-            return namespace
+            import types
+
+            module_name = "logistics_news_baseline"
+            module = types.ModuleType(module_name)
+            module.__file__ = str(Path(__file__))
+            sys.modules[module_name] = module
+
+            exec(compile(source, BASELINE_URL, "exec"), module.__dict__)
+            return module.__dict__
 
         except Exception as error:
             last_error = error
