@@ -17,6 +17,7 @@ slots from the main "news" list.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,7 +32,7 @@ BASELINE_URL = (
     "46ace41/update_news.py"
 )
 
-COLLECTOR_VERSION = "2026-09-11-fuel-tolls-v1"
+COLLECTOR_VERSION = "2026-09-11-fuel-tolls-v2-dedup"
 
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 
@@ -39,8 +40,8 @@ RSS_RETRIES = 3
 RSS_RETRY_DELAY = 10
 RSS_INTER_FEED_DELAY = 2
 
-MAX_FUEL_SIGNALS = 6
-MAX_TOLL_SIGNALS = 6
+MAX_FUEL_SIGNALS = 4
+MAX_TOLL_SIGNALS = 4
 MAX_COST_SIGNALS = MAX_FUEL_SIGNALS + MAX_TOLL_SIGNALS
 
 USER_AGENT = "logistics-news-rss/2.1 (+public GitHub Actions feed)"
@@ -285,6 +286,29 @@ SEA_FUEL_TERMS = (
     "бункерное топливо",
 )
 
+CRUDE_FUEL_TERMS = (
+    "brent",
+    "urals",
+    "crude oil",
+    "oil price",
+    "oil prices",
+    "нефть brent",
+    "нефть urals",
+    "цена нефти",
+    "цены на нефть",
+)
+
+FUEL_BUCKET_ORDER = ("crude", "road", "marine", "air")
+
+FUEL_BUCKET_TITLES = {
+    "crude": "Нефть Brent / Urals",
+    "road": "Автотопливо / дизель",
+    "marine": "Судовое топливо",
+    "air": "Авиационное топливо",
+}
+
+FUEL_BUILD_LIMIT_PER_BUCKET = 8
+
 
 def clean(value) -> str:
     return " ".join(str(value or "").split())
@@ -293,6 +317,126 @@ def clean(value) -> str:
 def contains_any(text: str, terms) -> bool:
     lowered = clean(text).lower()
     return any(term.lower() in lowered for term in terms)
+
+
+def fuel_bucket_for_text(text: str) -> str:
+    """Map a fuel article to exactly one logistics cost bucket."""
+    lowered = clean(text).lower()
+
+    # Specific transport fuels win over broad oil mentions.
+    if contains_any(lowered, AIR_FUEL_TERMS):
+        return "air"
+
+    if contains_any(lowered, SEA_FUEL_TERMS):
+        return "marine"
+
+    if contains_any(lowered, ROAD_FUEL_TERMS):
+        return "road"
+
+    if contains_any(lowered, CRUDE_FUEL_TERMS):
+        return "crude"
+
+    return ""
+
+
+def geography_priority(text: str) -> int:
+    """Priority follows the project's logistics directions."""
+    lowered = clean(text).lower()
+
+    if re.search(r"(?<!\w)(рф|россия|россии|российский|russia|russian)(?!\w)", lowered):
+        return 100
+
+    if re.search(r"(?<!\w)(рб|беларусь|белоруссия|belarus)(?!\w)", lowered):
+        return 95
+
+    if re.search(r"(?<!\w)(европа|евросоюз|ес|europe|european|eu)(?!\w)", lowered):
+        return 85
+
+    if re.search(r"(?<!\w)(китай|china|chinese)(?!\w)", lowered):
+        return 80
+
+    if re.search(r"(?<!\w)(турция|turkey|turkish)(?!\w)", lowered):
+        return 75
+
+    if re.search(r"(?<!\w)(сша|usa|u\.s\.|united states)(?!\w)", lowered):
+        return 45
+
+    if re.search(r"(?<!\w)(бразилия|brazil|petrobras)(?!\w)", lowered):
+        return 35
+
+    return 65
+
+
+def source_priority(domain: str) -> int:
+    lowered = clean(domain).lower()
+
+    official_markers = (
+        "minenergo.gov.ru",
+        "rosstat.gov.ru",
+        "mintrans.gov.ru",
+        "rosavtodor.gov.ru",
+        "avtodor-tr.ru",
+        "beltoll.by",
+        "mintrans.gov.by",
+        "belneftekhim.by",
+    )
+
+    if any(marker in lowered for marker in official_markers):
+        return 100
+
+    if "reuters.com" in lowered:
+        return 95
+
+    if "bloomberg.com" in lowered:
+        return 90
+
+    if "interfax.ru" in lowered:
+        return 85
+
+    return 60
+
+
+def raw_article_priority(article: dict) -> int:
+    text = clean(
+        f"{article.get('title', '')} {article.get('excerpt', '')} "
+        f"{article.get('sourcecountry', '')}"
+    )
+
+    label = clean(article.get("feedLabel"))
+
+    label_bonus = {
+        "fuel-russia": 50,
+        "fuel-belarus": 45,
+        "fuel-china": 35,
+        "fuel-reuters-bloomberg": 30,
+        "fuel-global": 20,
+        "toll-roads-russia-official": 55,
+        "toll-roads-belarus-official": 55,
+        "toll-roads-russia": 45,
+        "toll-roads-belarus": 45,
+    }.get(label, 0)
+
+    return geography_priority(text) * 10 + label_bonus
+
+
+def final_fuel_priority(item: dict, article: dict) -> int:
+    source = (item.get("sources") or [{}])[0] or {}
+    domain = clean(source.get("name"))
+
+    text = clean(
+        f"{item.get('title', '')} {item.get('summary', '')} "
+        f"{item.get('route', '')} {item.get('country', '')} "
+        f"{article.get('title', '')} {article.get('excerpt', '')}"
+    )
+
+    movement_bonus = 8 if item.get("movement") in {"↑", "↓"} else 0
+
+    return (
+        geography_priority(text) * 1000
+        + source_priority(domain) * 10
+        + movement_bonus
+        + int(item.get("importanceScore", 0))
+    )
 
 
 def load_baseline_namespace() -> dict:
@@ -517,6 +661,13 @@ def build_cost_item(article: dict, base: dict, translator) -> dict | None:
     )
 
     full_ru = clean(f"{title_ru} {text_ru}")
+
+    fuel_type = ""
+    if category == "fuel":
+        fuel_type = fuel_bucket_for_text(evidence + " " + full_ru)
+        if not fuel_type:
+            return None
+
     movement, rate_pressure = movement_for(evidence + " " + full_ru)
     transports = infer_transport(evidence + " " + full_ru, category)
     directions = direction_for_cost_signal(evidence + " " + full_ru, base)
@@ -600,6 +751,8 @@ def build_cost_item(article: dict, base: dict, translator) -> dict | None:
         "date": base["date_for"](clean(article.get("seendate"))),
         "category": category,
         "categoryTitle": "Топливо и ставки" if category == "fuel" else "Платные дороги",
+        "fuelType": fuel_type if category == "fuel" else "",
+        "fuelTypeTitle": FUEL_BUCKET_TITLES.get(fuel_type, "") if category == "fuel" else "",
         "importance": "Высокая" if score >= 90 else "Средняя",
         "importanceScore": score,
         "sourceLanguage": (
@@ -674,73 +827,100 @@ def build_cost_signals(articles: list[dict], base: dict) -> list[dict]:
 
     candidates = list(unique_by_url.values())
 
-    # Prefer official / high-value labels first.
-    label_bonus = {
-        "toll-roads-russia-official": 40,
-        "toll-roads-belarus-official": 40,
-        "fuel-reuters-bloomberg": 35,
-        "toll-roads-russia": 25,
-        "toll-roads-belarus": 25,
-        "fuel-russia": 20,
-        "fuel-belarus": 20,
-        "fuel-global": 15,
-        "fuel-china": 15,
+    # ------------------------------------------------------------
+    # FUEL: exactly one best card per distinct logistics indicator.
+    # This prevents several Reuters/Bloomberg articles about the
+    # same diesel or Brent move from filling the whole column.
+    # ------------------------------------------------------------
+    fuel_groups: dict[str, list[dict]] = {
+        bucket: [] for bucket in FUEL_BUCKET_ORDER
     }
 
-    candidates.sort(
-        key=lambda article: label_bonus.get(
-            clean(article.get("feedLabel")),
-            0,
-        ),
-        reverse=True,
-    )
-
-    selected: list[dict] = []
-    fuel_count = 0
-    toll_count = 0
-    per_domain: dict[str, int] = {}
+    toll_candidates: list[dict] = []
 
     for article in candidates:
         category = clean(article.get("costCategory"))
 
-        if category == "fuel" and fuel_count >= MAX_FUEL_SIGNALS:
+        if category == "fuel":
+            raw_text = clean(
+                f"{article.get('title', '')} {article.get('excerpt', '')}"
+            )
+            bucket = fuel_bucket_for_text(raw_text)
+
+            if bucket:
+                fuel_groups[bucket].append(article)
+
+        elif category == "tolls":
+            toll_candidates.append(article)
+
+    fuel_selected: list[dict] = []
+
+    for bucket in FUEL_BUCKET_ORDER:
+        group = fuel_groups[bucket]
+        group.sort(key=raw_article_priority, reverse=True)
+
+        built: list[tuple[dict, dict]] = []
+
+        # Resolve only a limited number of the best raw candidates.
+        for article in group[:FUEL_BUILD_LIMIT_PER_BUCKET]:
+            item = build_cost_item(article, base, translator)
+
+            if not item:
+                continue
+
+            if item.get("fuelType") != bucket:
+                continue
+
+            built.append((item, article))
+
+        if not built:
             continue
 
-        if category == "tolls" and toll_count >= MAX_TOLL_SIGNALS:
-            continue
+        built.sort(
+            key=lambda pair: final_fuel_priority(pair[0], pair[1]),
+            reverse=True,
+        )
+
+        best_item = built[0][0]
+        fuel_selected.append(best_item)
+
+        if len(fuel_selected) >= MAX_FUEL_SIGNALS:
+            break
+
+    # ------------------------------------------------------------
+    # TOLLS: retain event-level duplicate protection.
+    # ------------------------------------------------------------
+    toll_candidates.sort(key=raw_article_priority, reverse=True)
+
+    toll_selected: list[dict] = []
+    toll_per_domain: dict[str, int] = {}
+
+    for article in toll_candidates:
+        if len(toll_selected) >= MAX_TOLL_SIGNALS:
+            break
 
         item = build_cost_item(article, base, translator)
         if not item:
             continue
 
         domain = clean(item.get("sources", [{}])[0].get("name"))
-        if per_domain.get(domain, 0) >= 2:
+
+        if toll_per_domain.get(domain, 0) >= 2:
             continue
 
-        if is_duplicate_cost_item(item, selected, base):
+        if is_duplicate_cost_item(item, toll_selected, base):
             continue
 
-        selected.append(item)
-        per_domain[domain] = per_domain.get(domain, 0) + 1
+        toll_selected.append(item)
+        toll_per_domain[domain] = toll_per_domain.get(domain, 0) + 1
 
-        if category == "fuel":
-            fuel_count += 1
-        elif category == "tolls":
-            toll_count += 1
-
-        if len(selected) >= MAX_COST_SIGNALS:
-            break
-
-    selected.sort(
-        key=lambda item: (
-            0 if item.get("category") == "tolls" else 1,
-            -int(item.get("importanceScore", 0)),
-        )
-    )
+    selected = toll_selected + fuel_selected
 
     print(
         "Cost signals: "
-        f"fuel={fuel_count}, tolls={toll_count}, total={len(selected)}"
+        f"fuel={len(fuel_selected)} "
+        f"({', '.join(item.get('fuelType', '') for item in fuel_selected)}), "
+        f"tolls={len(toll_selected)}, total={len(selected)}"
     )
 
     return selected
