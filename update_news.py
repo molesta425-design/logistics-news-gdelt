@@ -22,6 +22,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -32,7 +33,7 @@ BASELINE_URL = (
     "46ace41/update_news.py"
 )
 
-COLLECTOR_VERSION = "2026-09-11-fuel-tolls-v2-dedup"
+COLLECTOR_VERSION = "2026-09-11-fuel-tolls-v3-official-tolls"
 
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 
@@ -123,21 +124,6 @@ EXTRA_FEEDS = [
         ),
     },
     {
-        "label": "toll-roads-russia",
-        "language": "Russian",
-        "hl": "ru",
-        "gl": "RU",
-        "ceid": "RU:ru",
-        "sourceType": "cost-signal",
-        "costCategory": "tolls",
-        "query": (
-            '("Платон" OR "платные дороги" OR "платный участок" OR Автодор OR '
-            '"М-1" OR "М-3" OR "М-4" OR "М-11" OR "М-12" OR ЦКАД) '
-            '(тариф OR стоимость OR индексация OR повышение OR снижение OR '
-            'плата OR проезд OR грузовик OR большегруз) when:1d'
-        ),
-    },
-    {
         "label": "toll-roads-russia-official",
         "language": "Russian",
         "hl": "ru",
@@ -146,24 +132,9 @@ EXTRA_FEEDS = [
         "sourceType": "cost-signal",
         "costCategory": "tolls",
         "query": (
-            '(site:avtodor-tr.ru OR site:rosavtodor.gov.ru OR site:mintrans.gov.ru) '
+            '(site:platon.ru OR site:avtodor-tr.ru OR site:rosavtodor.gov.ru OR site:mintrans.gov.ru) '
             '("платные дороги" OR "Платон" OR тариф OR проезд OR индексация OR '
             '"М-1" OR "М-3" OR "М-4" OR "М-11" OR "М-12" OR ЦКАД) when:1d'
-        ),
-    },
-    {
-        "label": "toll-roads-belarus",
-        "language": "Russian",
-        "hl": "ru",
-        "gl": "BY",
-        "ceid": "BY:ru",
-        "sourceType": "cost-signal",
-        "costCategory": "tolls",
-        "query": (
-            '(BelToll OR "платные дороги" OR "плата за проезд" OR '
-            '"дорожный сбор" OR "электронная система сбора платы") '
-            '(Беларусь OR РБ) '
-            '(тариф OR стоимость OR повышение OR снижение OR изменение OR ставка) when:1d'
         ),
     },
     {
@@ -221,6 +192,16 @@ TOLL_TERMS = (
     "м-11",
     "м-12",
 )
+
+OFFICIAL_TOLL_DOMAINS = (
+    "platon.ru",
+    "avtodor-tr.ru",
+    "rosavtodor.gov.ru",
+    "mintrans.gov.ru",
+    "beltoll.by",
+    "mintrans.gov.by",
+)
+
 
 UP_TERMS = (
     "rise",
@@ -367,10 +348,40 @@ def geography_priority(text: str) -> int:
     return 65
 
 
+def is_official_toll_source(domain: str, url: str = "") -> bool:
+    """Return True only for approved official toll-road domains/subdomains."""
+    candidates: list[str] = []
+
+    raw_domain = clean(domain).lower().strip().strip(".")
+    if raw_domain:
+        if raw_domain.startswith("www."):
+            raw_domain = raw_domain[4:]
+        candidates.append(raw_domain)
+
+    raw_url = clean(url)
+    if raw_url:
+        try:
+            host = (urlsplit(raw_url).hostname or "").lower().strip(".")
+            if host.startswith("www."):
+                host = host[4:]
+            if host:
+                candidates.append(host)
+        except Exception:
+            pass
+
+    for candidate in candidates:
+        for official_domain in OFFICIAL_TOLL_DOMAINS:
+            if candidate == official_domain or candidate.endswith("." + official_domain):
+                return True
+
+    return False
+
+
 def source_priority(domain: str) -> int:
     lowered = clean(domain).lower()
 
     official_markers = (
+        "platon.ru",
         "minenergo.gov.ru",
         "rosstat.gov.ru",
         "mintrans.gov.ru",
@@ -412,8 +423,6 @@ def raw_article_priority(article: dict) -> int:
         "fuel-global": 20,
         "toll-roads-russia-official": 55,
         "toll-roads-belarus-official": 55,
-        "toll-roads-russia": 45,
-        "toll-roads-belarus": 45,
     }.get(label, 0)
 
     return geography_priority(text) * 10 + label_bonus
@@ -677,6 +686,12 @@ def build_cost_item(article: dict, base: dict, translator) -> dict | None:
         clean(article.get("domain")),
     )
 
+    official_confirmed = False
+    if category == "tolls":
+        official_confirmed = is_official_toll_source(domain, url)
+        if not official_confirmed:
+            return None
+
     event_country = base["event_geography_for"](
         evidence,
         clean(article.get("sourcecountry")),
@@ -737,6 +752,7 @@ def build_cost_item(article: dict, base: dict, translator) -> dict | None:
     if domain in {
         "reuters.com",
         "bloomberg.com",
+        "platon.ru",
         "mintrans.gov.ru",
         "rosavtodor.gov.ru",
         "avtodor-tr.ru",
@@ -773,6 +789,12 @@ def build_cost_item(article: dict, base: dict, translator) -> dict | None:
         "effect": effect,
         "movement": movement,
         "ratePressure": rate_pressure,
+        "officialConfirmed": official_confirmed if category == "tolls" else None,
+        "verification": (
+            "Подтверждено официальным источником"
+            if category == "tolls" and official_confirmed
+            else ""
+        ),
         "sources": [{"name": domain, "url": url}],
         "assessment": (
             f"Сигнал влияния на логистические ставки: "
@@ -888,7 +910,8 @@ def build_cost_signals(articles: list[dict], base: dict) -> list[dict]:
             break
 
     # ------------------------------------------------------------
-    # TOLLS: retain event-level duplicate protection.
+    # TOLLS: output ONLY officially confirmed changes.
+    # Media articles are not allowed to create a toll card.
     # ------------------------------------------------------------
     toll_candidates.sort(key=raw_article_priority, reverse=True)
 
