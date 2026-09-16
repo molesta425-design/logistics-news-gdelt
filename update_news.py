@@ -33,7 +33,7 @@ BASELINE_URL = (
     "46ace41/update_news.py"
 )
 
-COLLECTOR_VERSION = "2026-09-15-regulation-v1"
+COLLECTOR_VERSION = "2026-09-16-direct-impact-v2"
 
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 
@@ -423,6 +423,101 @@ REGULATION_TARIFF_TERMS = (
     "снижение тарифа",
 )
 
+
+REGULATION_INDIRECT_TRAINING_TERMS = (
+    "cdl school",
+    "cdl schools",
+    "truck driving school",
+    "truck driving schools",
+    "driving school",
+    "driving schools",
+    "training provider",
+    "training providers",
+    "training provider registry",
+    "entry-level driver training",
+    "entry level driver training",
+    "eldt",
+    "training curriculum",
+    "training program",
+    "training programs",
+    "student enrollment",
+    "students",
+    "instructors",
+    "tuition",
+    "driver recruitment",
+    "driver hiring",
+    "driver shortage",
+    "workforce",
+    "apprenticeship",
+    "школа водителей",
+    "школы водителей",
+    "автошкол",
+    "обучение водителей",
+    "подготовка водителей",
+    "учебная программа",
+    "учебной программы",
+    "поставщик обучения",
+    "поставщики обучения",
+    "реестр поставщиков обучения",
+    "студент",
+    "инструктор",
+    "набор водителей",
+    "нехватка водителей",
+    "дефицит водителей",
+)
+
+REGULATION_DIRECT_DRIVER_RULE_TERMS = (
+    "cdl suspended",
+    "cdl suspension",
+    "cdl revoked",
+    "cdl revocation",
+    "commercial driver's license suspended",
+    "commercial driver license suspended",
+    "commercial driver's license revoked",
+    "commercial driver license revoked",
+    "driver license suspended",
+    "driver licence suspended",
+    "driver license revoked",
+    "driver licence revoked",
+    "operating authority",
+    "carrier authority",
+    "carrier registration",
+    "hours of service",
+    "electronic logging device",
+    "eld mandate",
+    "eld requirement",
+    "medical certificate requirement",
+    "medical certification requirement",
+    "приостановление водительского удостоверения",
+    "аннулирование водительского удостоверения",
+    "лишение водительского удостоверения",
+    "допуск перевозчика",
+    "лицензия перевозчика",
+    "режим труда и отдыха",
+    "тахограф",
+)
+
+def is_indirect_training_or_workforce_news(text: str) -> bool:
+    """Exclude HR/training stories that do not directly change freight operations."""
+    lowered = clean(text).lower()
+    if not contains_any(lowered, REGULATION_INDIRECT_TRAINING_TERMS):
+        return False
+
+    # A driver-school/training article is allowed only if the same text
+    # announces a direct legal restriction on the driver's/carrier's ability
+    # to operate, not merely a school/provider/training action.
+    if contains_any(lowered, REGULATION_DIRECT_DRIVER_RULE_TERMS):
+        return False
+
+    return True
+
+def is_operational_core_article(article: dict) -> bool:
+    text = clean(
+        f"{article.get('title', '')} {article.get('excerpt', '')} "
+        f"{article.get('sourcecountry', '')}"
+    )
+    return not is_indirect_training_or_workforce_news(text)
+
 REGULATION_PRIORITY_REGION_TERMS = (
     "росси",
     "рф",
@@ -620,6 +715,11 @@ def final_fuel_priority(item: dict, article: dict) -> int:
 
 def regulation_type_for_text(text: str) -> str:
     lowered = clean(text).lower()
+
+    # Training/school/workforce stories are not operational regulation unless
+    # they directly suspend/revoke a driver's or carrier's authority to operate.
+    if is_indirect_training_or_workforce_news(lowered):
+        return ""
 
     # More specific classes first.
     if contains_any(lowered, REGULATION_DOCUMENT_TERMS):
@@ -1470,7 +1570,19 @@ def main() -> int:
         )
         return 1
 
-    feed = base["build_feed"](core_articles)
+    operational_core_articles = [
+        article for article in core_articles
+        if is_operational_core_article(article)
+    ]
+
+    excluded_indirect = len(core_articles) - len(operational_core_articles)
+    if excluded_indirect:
+        print(
+            "Core relevance filter: "
+            f"excluded indirect training/workforce articles={excluded_indirect}"
+        )
+
+    feed = base["build_feed"](operational_core_articles)
 
     if not feed.get("news"):
         for failure in core_failures:
@@ -1500,7 +1612,7 @@ def main() -> int:
     # It is built from the full fetched core pool, not only from the selected
     # 12 main news cards, and includes official toll-road changes.
     regulation_signals = build_regulation_signals(
-        core_articles,
+        operational_core_articles,
         toll_signals,
         base,
     )
@@ -1530,7 +1642,7 @@ def main() -> int:
         "all": regulation_signals,
     }
 
-    # Keep the original main "news" array untouched.
+    # Main news keeps the baseline selection logic after the direct-impact relevance filter.
     write_feed(feed)
 
     print(f"Saved {len(feed['news'])} news items to {OUTPUT_PATH}")
