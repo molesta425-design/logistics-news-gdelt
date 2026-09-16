@@ -33,7 +33,7 @@ BASELINE_URL = (
     "46ace41/update_news.py"
 )
 
-COLLECTOR_VERSION = "2026-09-11-fuel-tolls-v3-official-tolls"
+COLLECTOR_VERSION = "2026-09-15-regulation-v1"
 
 OUTPUT_PATH = Path(__file__).with_name("news.json")
 
@@ -44,6 +44,8 @@ RSS_INTER_FEED_DELAY = 2
 MAX_FUEL_SIGNALS = 4
 MAX_TOLL_SIGNALS = 4
 MAX_COST_SIGNALS = MAX_FUEL_SIGNALS + MAX_TOLL_SIGNALS
+MAX_REGULATION_SIGNALS = 4
+MAX_REGULATION_BUILD_CANDIDATES = 18
 
 USER_AGENT = "logistics-news-rss/2.1 (+public GitHub Actions feed)"
 
@@ -290,6 +292,173 @@ FUEL_BUCKET_TITLES = {
 
 FUEL_BUILD_LIMIT_PER_BUCKET = 8
 
+REGULATION_TYPE_TITLES = {
+    "documents": "Документы",
+    "restrictions": "Ограничения",
+    "borders": "Граница / таможня",
+    "tariffs": "Тарифы и сборы",
+    "tolls": "Платные дороги",
+}
+
+REGULATION_TYPE_ORDER = (
+    "tolls",
+    "borders",
+    "documents",
+    "restrictions",
+    "tariffs",
+)
+
+REGULATION_DOCUMENT_TERMS = (
+    "transport document",
+    "transport documents",
+    "electronic transport document",
+    "electronic consignment note",
+    "consignment note",
+    "e-cmr",
+    "cmr",
+    "bill of lading",
+    "electronic bill of lading",
+    "ebl",
+    "air waybill",
+    "e-awb",
+    "rail consignment note",
+    "smgs",
+    "cim",
+    "transit declaration",
+    "customs declaration",
+    "cargo manifest",
+    "transport permit",
+    "transport documents",
+    "documentation requirement",
+    "транспортн документ",
+    "перевозочн документ",
+    "электронн перевозочн",
+    "электронн транспортн накладн",
+    "транспортн накладн",
+    "эпд",
+    "е-cmr",
+    "e-cmr",
+    "коносамент",
+    "авианакладн",
+    "железнодорожн накладн",
+    "смгс",
+    "цим",
+    "транзитн деклараци",
+    "таможенн деклараци",
+    "грузов манифест",
+    "разрешени на перевоз",
+)
+
+REGULATION_BORDER_TERMS = (
+    "border crossing",
+    "border checkpoint",
+    "checkpoint",
+    "customs checkpoint",
+    "customs clearance",
+    "border control",
+    "customs control",
+    "border closure",
+    "border restriction",
+    "пункт пропуска",
+    "погранпереход",
+    "пограничн переход",
+    "границ",
+    "таможенн оформлен",
+    "таможенн контрол",
+    "таможн",
+    "досмотр",
+)
+
+REGULATION_RESTRICTION_TERMS = (
+    "freight restriction",
+    "truck restriction",
+    "road restriction",
+    "weight restriction",
+    "axle load",
+    "seasonal restriction",
+    "movement restriction",
+    "traffic restriction",
+    "cargo ban",
+    "import ban",
+    "export ban",
+    "booking suspension",
+    "закрытие движения",
+    "ограничение движения",
+    "ограничения движения",
+    "весогабарит",
+    "осев нагруз",
+    "временн огранич",
+    "сезонн огранич",
+    "запрет движения",
+    "запрет перевоз",
+    "запрет на ввоз",
+    "запрет на вывоз",
+    "приостановк перевоз",
+)
+
+REGULATION_TARIFF_TERMS = (
+    "rail tariff",
+    "rail freight tariff",
+    "freight tariff",
+    "port dues",
+    "port fee",
+    "terminal fee",
+    "customs duty",
+    "customs tariff",
+    "tariff indexation",
+    "tariff increase",
+    "tariff decrease",
+    "surcharge",
+    "железнодорожн тариф",
+    "тариф на груз",
+    "тариф перевоз",
+    "индексац тариф",
+    "портов сбор",
+    "терминальн сбор",
+    "таможенн пошлин",
+    "таможенн тариф",
+    "дорожн сбор",
+    "ставк сбор",
+    "повышение тарифа",
+    "снижение тарифа",
+)
+
+REGULATION_PRIORITY_REGION_TERMS = (
+    "росси",
+    "рф",
+    "беларус",
+    "рб",
+    "китай",
+    "china",
+    "турц",
+    "turkey",
+    "еаэс",
+    "eaeu",
+)
+
+REGULATION_OFFICIAL_MARKERS = (
+    ".gov",
+    ".gov.ru",
+    ".gov.by",
+    ".gov.cn",
+    ".gov.tr",
+    "government.ru",
+    "publication.pravo.gov.ru",
+    "pravo.by",
+    "eec.eaeunion.org",
+    "rzd.ru",
+    "company.rzd.ru",
+    "rw.by",
+    "platon.ru",
+    "avtodor-tr.ru",
+    "beltoll.by",
+    "iru.org",
+    "iata.org",
+    "imo.org",
+    "wcoomd.org",
+    "ec.europa.eu",
+)
+
 
 def clean(value) -> str:
     return " ".join(str(value or "").split())
@@ -446,6 +615,305 @@ def final_fuel_priority(item: dict, article: dict) -> int:
         + movement_bonus
         + int(item.get("importanceScore", 0))
     )
+
+
+
+def regulation_type_for_text(text: str) -> str:
+    lowered = clean(text).lower()
+
+    # More specific classes first.
+    if contains_any(lowered, REGULATION_DOCUMENT_TERMS):
+        return "documents"
+
+    if contains_any(lowered, REGULATION_BORDER_TERMS):
+        return "borders"
+
+    if contains_any(lowered, REGULATION_RESTRICTION_TERMS):
+        return "restrictions"
+
+    if contains_any(lowered, REGULATION_TARIFF_TERMS):
+        return "tariffs"
+
+    # Russian tariff wording is highly inflected, so use stems only when the
+    # same text is clearly about freight/customs/transport infrastructure.
+    if contains_any(
+        lowered,
+        ("тариф", "пошлин", "сбор", "индексац"),
+    ) and contains_any(
+        lowered,
+        (
+            "груз",
+            "перевоз",
+            "железнод",
+            "ржд",
+            "порт",
+            "терминал",
+            "тамож",
+            "фрахт",
+            "freight",
+            "cargo",
+            "rail",
+            "port",
+            "terminal",
+            "customs",
+            "truck",
+        ),
+    ):
+        return "tariffs"
+
+    return ""
+
+
+def regulation_source_is_trusted(article: dict, base: dict) -> bool:
+    url = clean(article.get("url"))
+    domain = base["source_name"](url, clean(article.get("domain"))).lower()
+    source_type = clean(article.get("sourceType")).lower()
+
+    if any(marker in domain for marker in REGULATION_OFFICIAL_MARKERS):
+        return True
+
+    # Reuters/Bloomberg and baseline trusted sources are accepted as
+    # secondary confirmation when an official page is not indexed yet.
+    if domain in {"reuters.com", "bloomberg.com"}:
+        return True
+
+    try:
+        if base["domain_bonus"](domain) >= 8:
+            return True
+    except Exception:
+        pass
+
+    if source_type in {"carrier", "documents"}:
+        return True
+
+    return False
+
+
+def regulation_verification(article: dict, base: dict) -> str:
+    url = clean(article.get("url"))
+    domain = base["source_name"](url, clean(article.get("domain"))).lower()
+
+    if any(marker in domain for marker in REGULATION_OFFICIAL_MARKERS):
+        return "Официальный / первичный источник"
+
+    if domain in {"reuters.com", "bloomberg.com"}:
+        return "Подтверждено надёжным информационным источником"
+
+    return "Проверенный отраслевой источник"
+
+
+def regulation_raw_priority(article: dict, base: dict) -> int:
+    text = clean(
+        f"{article.get('title', '')} {article.get('excerpt', '')} "
+        f"{article.get('sourcecountry', '')}"
+    )
+    category = regulation_type_for_text(text)
+    if not category:
+        return -10000
+
+    score = geography_priority(text) * 10
+
+    if contains_any(text, REGULATION_PRIORITY_REGION_TERMS):
+        score += 120
+
+    url = clean(article.get("url"))
+    domain = base["source_name"](url, clean(article.get("domain"))).lower()
+
+    if any(marker in domain for marker in REGULATION_OFFICIAL_MARKERS):
+        score += 150
+    elif domain == "reuters.com":
+        score += 110
+    elif domain == "bloomberg.com":
+        score += 100
+    else:
+        try:
+            score += max(0, base["domain_bonus"](domain)) * 5
+        except Exception:
+            pass
+
+    # Border/document changes are more operationally urgent for the project.
+    score += {
+        "borders": 80,
+        "documents": 70,
+        "restrictions": 60,
+        "tariffs": 50,
+    }.get(category, 0)
+
+    return score
+
+
+def clone_regulation_item(item: dict, category: str, verification: str) -> dict:
+    copied = dict(item)
+    copied["regulationType"] = category
+    copied["regulationTypeTitle"] = REGULATION_TYPE_TITLES.get(category, category)
+    copied["verification"] = verification
+    return copied
+
+
+def is_duplicate_regulation_item(item: dict, selected: list[dict], base: dict) -> bool:
+    title = clean(item.get("title"))
+    for existing in selected:
+        if base["sentence_similarity"](
+            title,
+            clean(existing.get("title")),
+        ) >= 0.78:
+            return True
+    return False
+
+
+def build_regulation_signals(
+    core_articles: list[dict],
+    toll_signals: list[dict],
+    base: dict,
+) -> list[dict]:
+    """
+    Build the compact third column independently from the 12-news selection.
+    The source pool is the already fetched global core feed, so no extra RSS
+    requests are added and the working collector remains stable.
+    """
+    translator = base["get_translator"]()
+    now = datetime.now(timezone.utc)
+
+    unique_by_url: dict[str, dict] = {}
+    for article in core_articles:
+        url = clean(article.get("url"))
+        title = clean(article.get("title"))
+        raw_text = clean(f"{title} {article.get('excerpt', '')}")
+
+        if not (
+            url.startswith("http")
+            and title
+            and regulation_type_for_text(raw_text)
+            and regulation_source_is_trusted(article, base)
+            and base["is_recent_article"](clean(article.get("seendate")), now)
+        ):
+            continue
+
+        unique_by_url[url] = article
+
+    candidates = list(unique_by_url.values())
+    candidates.sort(
+        key=lambda article: regulation_raw_priority(article, base),
+        reverse=True,
+    )
+
+    built_by_type: dict[str, list[dict]] = {
+        "borders": [],
+        "documents": [],
+        "restrictions": [],
+        "tariffs": [],
+    }
+
+    build_count = 0
+    for article in candidates:
+        if build_count >= MAX_REGULATION_BUILD_CANDIDATES:
+            break
+
+        raw_text = clean(f"{article.get('title', '')} {article.get('excerpt', '')}")
+        category = regulation_type_for_text(raw_text)
+        if not category:
+            continue
+
+        build_count += 1
+        try:
+            item = base["article_to_news"](article, translator)
+        except Exception as error:
+            print(
+                f"Regulation build warning for {clean(article.get('title'))}: {error}",
+                file=sys.stderr,
+            )
+            continue
+
+        if not item:
+            continue
+
+        verification = regulation_verification(article, base)
+        built = clone_regulation_item(item, category, verification)
+
+        if is_duplicate_regulation_item(
+            built,
+            [
+                existing
+                for values in built_by_type.values()
+                for existing in values
+            ],
+            base,
+        ):
+            continue
+
+        built_by_type[category].append(built)
+
+    # Existing toll cards are already official-only. Add them to the same
+    # compact regulation feed, without changing costSignals.tolls.
+    toll_items: list[dict] = []
+    for item in toll_signals:
+        copied = clone_regulation_item(
+            item,
+            "tolls",
+            clean(item.get("verification")) or "Подтверждено официальным источником",
+        )
+        toll_items.append(copied)
+
+    for category, values in built_by_type.items():
+        values.sort(
+            key=lambda item: int(item.get("importanceScore", 0)),
+            reverse=True,
+        )
+
+    toll_items.sort(
+        key=lambda item: int(item.get("importanceScore", 0)),
+        reverse=True,
+    )
+
+    pools = {
+        **built_by_type,
+        "tolls": toll_items,
+    }
+
+    selected: list[dict] = []
+
+    # First pass: no more than one card from each category.
+    for category in REGULATION_TYPE_ORDER:
+        values = pools.get(category, [])
+        if not values:
+            continue
+
+        candidate = values.pop(0)
+        if not is_duplicate_regulation_item(candidate, selected, base):
+            selected.append(candidate)
+
+        if len(selected) >= MAX_REGULATION_SIGNALS:
+            break
+
+    # Second pass: fill remaining slots with the strongest leftovers.
+    if len(selected) < MAX_REGULATION_SIGNALS:
+        leftovers = [
+            item
+            for category in REGULATION_TYPE_ORDER
+            for item in pools.get(category, [])
+        ]
+        leftovers.sort(
+            key=lambda item: int(item.get("importanceScore", 0)),
+            reverse=True,
+        )
+
+        for item in leftovers:
+            if is_duplicate_regulation_item(item, selected, base):
+                continue
+
+            selected.append(item)
+            if len(selected) >= MAX_REGULATION_SIGNALS:
+                break
+
+    print(
+        "Regulation signals: "
+        + ", ".join(
+            f"{item.get('regulationType')}={item.get('title', '')[:45]}"
+            for item in selected
+        )
+    )
+
+    return selected
 
 
 def load_baseline_namespace() -> dict:
@@ -1028,12 +1496,38 @@ def main() -> int:
         if item.get("category") == "tolls"
     ]
 
+    # 3. Independent compact feed for the third DataLens column.
+    # It is built from the full fetched core pool, not only from the selected
+    # 12 main news cards, and includes official toll-road changes.
+    regulation_signals = build_regulation_signals(
+        core_articles,
+        toll_signals,
+        base,
+    )
+
+    regulation_groups = {
+        category: [
+            item for item in regulation_signals
+            if item.get("regulationType") == category
+        ]
+        for category in REGULATION_TYPE_TITLES
+    }
+
     feed["collectorVersion"] = COLLECTOR_VERSION
     feed["costSignals"] = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "fuel": fuel_signals,
         "tolls": toll_signals,
         "all": cost_signals,
+    }
+    feed["regulationSignals"] = {
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "documents": regulation_groups["documents"],
+        "restrictions": regulation_groups["restrictions"],
+        "borders": regulation_groups["borders"],
+        "tariffs": regulation_groups["tariffs"],
+        "tolls": regulation_groups["tolls"],
+        "all": regulation_signals,
     }
 
     # Keep the original main "news" array untouched.
@@ -1043,6 +1537,10 @@ def main() -> int:
     print(
         "Saved cost signals: "
         f"fuel={len(fuel_signals)}, tolls={len(toll_signals)}"
+    )
+    print(
+        "Saved regulation signals: "
+        f"{len(regulation_signals)}"
     )
 
     all_failures = core_failures + cost_failures
